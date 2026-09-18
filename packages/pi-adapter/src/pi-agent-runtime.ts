@@ -4,6 +4,7 @@ import type {
   AgentInput,
   AgentRuntime,
   AgentStartOptions,
+  NetworkMode,
   Unsubscribe
 } from "@kripl/core";
 import { normalizePiEvent } from "./pi-event-normalizer.js";
@@ -20,6 +21,7 @@ export interface PiAgentRuntimeOptions {
   agentDir: string;
   sessionDir?: string;
   localModel: PiLocalModelConfig;
+  networkMode?: NetworkMode;
 }
 
 function responseError(response: JsonRecord): string | undefined {
@@ -56,9 +58,11 @@ export class PiAgentRuntime implements AgentRuntime {
         }
       });
 
-      const rpcOptions = this.options.sessionDir
-        ? { agentDir: this.options.agentDir, sessionDir: this.options.sessionDir }
-        : { agentDir: this.options.agentDir };
+      const rpcOptions = {
+        agentDir: this.options.agentDir,
+        ...(this.options.sessionDir ? { sessionDir: this.options.sessionDir } : {}),
+        ...(this.options.networkMode ? { networkMode: this.options.networkMode } : {})
+      };
 
       this.rpc.start(options.workspacePath, rpcOptions);
 

@@ -2,12 +2,19 @@ import type { AgentSessionMessage } from "@kripl/core";
 
 type JsonRecord = Record<string, unknown>;
 
+const MAX_MESSAGE_TEXT = 20_000;
+const MAX_MESSAGES = 500;
+
 function isRecord(value: unknown): value is JsonRecord {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function truncateText(value: string): string {
+  return value.length <= MAX_MESSAGE_TEXT ? value : value.slice(0, MAX_MESSAGE_TEXT) + "\n…";
+}
+
 function textFromContent(content: unknown): string {
-  if (typeof content === "string") return content;
+  if (typeof content === "string") return truncateText(content);
   if (!Array.isArray(content)) return "";
 
   const parts: string[] = [];
@@ -17,7 +24,7 @@ function textFromContent(content: unknown): string {
       parts.push(block.text);
     }
   }
-  return parts.join("\n");
+  return truncateText(parts.join("\n"));
 }
 
 function finiteTimestamp(value: unknown): number | undefined {
@@ -107,5 +114,5 @@ export function normalizePiSessionMessages(messages: unknown): AgentSessionMessa
     }
   }
 
-  return normalized;
+  return normalized.slice(-MAX_MESSAGES);
 }

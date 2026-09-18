@@ -28,8 +28,12 @@ declare global {
       onContextSnapshot(listener: (snapshot: ContextInspectorSnapshot) => void): () => void;
       listWorkspace(path?: string): Promise<WorkspaceEntry[]>;
       readWorkspaceFile(path: string): Promise<WorkspaceFilePreview>;
+      writeWorkspaceFile(path: string, content: string): Promise<WorkspaceFilePreview>;
       getWorkspaceChanges(): Promise<WorkspaceChange[]>;
       getWorkspaceDiff(path: string): Promise<WorkspaceDiff>;
+      stageWorkspaceChange(path: string): Promise<void>;
+      unstageWorkspaceChange(path: string): Promise<void>;
+      revertWorkspaceChange(path: string): Promise<void>;
       probeLocalModels(endpoint: string): Promise<{
         ok: boolean;
         endpoint: string;

@@ -13,7 +13,9 @@ import {
   open as openFileHandle,
   readdir,
   realpath,
-  stat
+  stat,
+  unlink,
+  writeFile
 } from "node:fs/promises";
 import {
   basename,
@@ -28,6 +30,7 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
+const MAX_EDIT_BYTES = 2 * 1024 * 1024;
 const MAX_DIFF_CHARS = 250_000;
 const MAX_DIRECTORY_ENTRIES = 5_000;
 
@@ -320,6 +323,27 @@ export class LocalWorkspaceRuntime implements WorkspaceRuntime {
     return preview;
   }
 
+  async writeFile(path: string, content: string): Promise<WorkspaceFilePreview> {
+    if (Buffer.byteLength(content, "utf8") > MAX_EDIT_BYTES) {
+      throw new Error("Edited file exceeds the 2 MB Kripl Studio limit.");
+    }
+
+    const current = await this.readFile(path);
+    if (current.binary) {
+      throw new Error("Binary files cannot be edited as text.");
+    }
+    if (current.truncated) {
+      throw new Error("Truncated previews cannot be saved.");
+    }
+
+    const target = await this.resolveExistingPath(path);
+    const info = await stat(target.absolute);
+    if (!info.isFile()) throw new Error("Workspace path is not a file.");
+
+    await writeFile(target.absolute, content, "utf8");
+    return this.readFile(target.relative);
+  }
+
   async getChanges(): Promise<WorkspaceChange[]> {
     const root = this.requireRoot();
     if (!this.currentDescriptor?.gitRepository) return [];
@@ -387,6 +411,78 @@ export class LocalWorkspaceRuntime implements WorkspaceRuntime {
     };
   }
 
+  async stage(path: string): Promise<void> {
+    const root = this.requireGitRoot();
+    const change = await this.requireChange(path);
+    const paths = this.changePaths(change);
+    await this.runGit(["add", "-A", "--", ...paths], root);
+  }
+
+  async unstage(path: string): Promise<void> {
+    const root = this.requireGitRoot();
+    const change = await this.requireChange(path);
+    if (!change.staged) return;
+
+    const paths = this.changePaths(change);
+    await this.runGit(["reset", "-q", "HEAD", "--", ...paths], root);
+  }
+
+  async revert(path: string): Promise<void> {
+    const root = this.requireGitRoot();
+    const change = await this.requireChange(path);
+    const relativePath = change.path;
+
+    if (change.status === "untracked") {
+      const target = await this.resolveExistingPath(relativePath);
+      const info = await stat(target.absolute);
+      if (!info.isFile()) throw new Error("Only untracked files can be removed from review.");
+      await unlink(target.absolute);
+      return;
+    }
+
+    if (change.status === "added") {
+      if (change.staged) {
+        await this.runGit(["reset", "-q", "HEAD", "--", relativePath], root);
+      }
+      try {
+        const target = await this.resolveExistingPath(relativePath);
+        const info = await stat(target.absolute);
+        if (info.isFile()) await unlink(target.absolute);
+      } catch {
+        // The added path may already be absent from the working tree.
+      }
+      return;
+    }
+
+    if (change.status === "renamed" && change.oldPath) {
+      if (change.staged) {
+        await this.runGit(
+          ["reset", "-q", "HEAD", "--", change.oldPath, relativePath],
+          root
+        );
+      }
+      await this.runGit(
+        ["restore", "--worktree", "--source=HEAD", "--", change.oldPath],
+        root
+      );
+      if (relativePath !== change.oldPath) {
+        try {
+          const target = await this.resolveExistingPath(relativePath);
+          const info = await stat(target.absolute);
+          if (info.isFile()) await unlink(target.absolute);
+        } catch {
+          // Destination may already have been removed by Git restore/reset.
+        }
+      }
+      return;
+    }
+
+    await this.runGit(
+      ["restore", "--staged", "--worktree", "--source=HEAD", "--", relativePath],
+      root
+    );
+  }
+
   async dispose(): Promise<void> {
     this.rootPath = undefined;
     this.canonicalRoot = undefined;
@@ -398,6 +494,28 @@ export class LocalWorkspaceRuntime implements WorkspaceRuntime {
       throw new Error("No workspace is open.");
     }
     return this.rootPath;
+  }
+
+  private requireGitRoot(): string {
+    const root = this.requireRoot();
+    if (!this.currentDescriptor?.gitRepository) {
+      throw new Error("Workspace is not a Git repository.");
+    }
+    return root;
+  }
+
+  private async requireChange(path: string): Promise<WorkspaceChange> {
+    const relativePath = this.validateRelativePath(path);
+    const changes = await this.getChanges();
+    const change = changes.find((item) => item.path === relativePath);
+    if (!change) throw new Error("File has no Git changes.");
+    return change;
+  }
+
+  private changePaths(change: WorkspaceChange): string[] {
+    return change.oldPath && change.oldPath !== change.path
+      ? [change.oldPath, change.path]
+      : [change.path];
   }
 
   private validateRelativePath(path: string): string {

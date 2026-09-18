@@ -567,6 +567,56 @@ export function App() {
     }
   }
 
+  async function saveWorkspaceFile(path: string, content: string) {
+    const file = await window.kripl.writeWorkspaceFile(path, content);
+    const changes = await window.kripl.getWorkspaceChanges();
+    setWorkspaceChanges(changes);
+    const view: WorkspaceView = { type: "file", file };
+    setWorkspaceView(view);
+    persistWorkspaceUi(view);
+  }
+
+  async function refreshDiffAfterAction(path: string) {
+    const changes = await window.kripl.getWorkspaceChanges();
+    setWorkspaceChanges(changes);
+    const stillChanged = changes.some((change) => change.path === path);
+
+    if (stillChanged) {
+      const diff = await window.kripl.getWorkspaceDiff(path);
+      const view: WorkspaceView = { type: "diff", diff };
+      setWorkspaceView(view);
+      persistWorkspaceUi(view);
+      return;
+    }
+
+    try {
+      const file = await window.kripl.readWorkspaceFile(path);
+      const view: WorkspaceView = { type: "file", file };
+      setWorkspaceView(view);
+      persistWorkspaceUi(view);
+    } catch {
+      const view: WorkspaceView = { type: "agent" };
+      setWorkspaceView(view);
+      persistWorkspaceUi(view);
+    }
+  }
+
+  async function stageWorkspaceChange(path: string) {
+    await window.kripl.stageWorkspaceChange(path);
+    await refreshDiffAfterAction(path);
+  }
+
+  async function unstageWorkspaceChange(path: string) {
+    await window.kripl.unstageWorkspaceChange(path);
+    await refreshDiffAfterAction(path);
+  }
+
+  async function revertWorkspaceChange(path: string) {
+    await window.kripl.revertWorkspaceChange(path);
+    await refreshWorkspace();
+    await refreshDiffAfterAction(path);
+  }
+
   async function retrieveMemory(query: string) {
     await window.kripl.retrieveMemory(query);
   }
@@ -852,6 +902,10 @@ export function App() {
                 setWorkspaceView(view);
                 persistWorkspaceUi(view);
               }}
+              onSaveFile={saveWorkspaceFile}
+              onStage={stageWorkspaceChange}
+              onUnstage={unstageWorkspaceChange}
+              onRevert={revertWorkspaceChange}
             />
           )}
         </main>

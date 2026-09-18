@@ -1,3 +1,4 @@
+export * from "./desktop-state.js";
 export * from "./terminal-runtime.js";
 export * from "./browser-runtime.js";
 export * from "./agent-runtime.js";

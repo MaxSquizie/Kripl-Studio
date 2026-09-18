@@ -222,7 +222,7 @@ export function WorkspaceContent({
   onRevert
 }: {
   view: WorkspaceDocumentView;
-  draft?: string;
+  draft: string | undefined;
   onDraftChange(path: string, content: string): void;
   onSaveFile(path: string, content: string): Promise<void>;
   onStage(path: string): Promise<void>;

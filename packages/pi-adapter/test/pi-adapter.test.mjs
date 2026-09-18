@@ -253,7 +253,7 @@ test("web tools fail closed in offline mode before issuing requests", async () =
     const search = result.extensions[0]?.tools.get("web_search");
     assert.ok(search);
     await assert.rejects(
-      () => search.execute("call-1", { query: "Kripl Studio" }, undefined, undefined, undefined),
+      () => search.definition.execute("call-1", { query: "Kripl Studio" }, undefined, undefined, undefined),
       /offline mode/
     );
   } finally {
@@ -277,7 +277,7 @@ test("web_open blocks localhost without touching the network", async () => {
     const open = result.extensions[0]?.tools.get("web_open");
     assert.ok(open);
     await assert.rejects(
-      () => open.execute("call-2", { url: "http://127.0.0.1:4317/" }, undefined, undefined, undefined),
+      () => open.definition.execute("call-2", { url: "http://127.0.0.1:4317/" }, undefined, undefined, undefined),
       /Private or local network addresses are blocked/
     );
   } finally {

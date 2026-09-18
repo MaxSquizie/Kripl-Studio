@@ -212,7 +212,8 @@ test("reverts tracked changes back to HEAD", async () => {
 
     await runtime.revert("README.md");
 
-    assert.equal(await readFile(join(directory, "README.md"), "utf8"), "# Workspace\n");
+    const restored = await readFile(join(directory, "README.md"), "utf8");
+    assert.equal(restored.replace(/\r\n/g, "\n"), "# Workspace\n");
     assert.equal(
       (await runtime.getChanges()).some((item) => item.path === "README.md"),
       false

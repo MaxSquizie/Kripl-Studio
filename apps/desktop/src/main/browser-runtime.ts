@@ -470,7 +470,9 @@ export class BrowserRuntime {
   }
 
   private layout(): void {
-    const [width, height] = this.window.getContentSize();
+    const size = this.window.getContentSize();
+    const width = size[0] ?? 0;
+    const height = size[1] ?? 0;
     const browserWidth = Math.min(
       MAX_BROWSER_WIDTH,
       Math.max(MIN_BROWSER_WIDTH, Math.floor(width * 0.52))

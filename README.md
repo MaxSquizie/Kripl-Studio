@@ -1,74 +1,65 @@
 # Kripl Studio
 
-Kripl Studio is an offline-first desktop workspace for agentic coding with local models.
+Kripl Studio is a Windows desktop workspace for agentic coding with local models and network-capable tools.
 
-The long-term goal is a Windows application where the coding agent, model backend, memory system, workspace tools, and UI are independent subsystems. Pi is the first agent runtime, not the permanent application core.
+The primary profile is **local inference + online tools**: the model can run in LM Studio, llama.cpp, or another local backend while the agent still uses browser search, documentation, GitHub, package registries, and other network tools when permitted.
 
-## Direction
+Kripl Studio must also remain usable offline. Offline mode is a separate runtime policy, not the default architecture.
+
+## Core direction
 
 ```text
-Kripl Studio Desktop
-        |
-        +-- Workspace runtime
-        |     +-- files
-        |     +-- git / diffs
-        |     +-- terminal / tests
-        |
-        +-- AgentRuntime
-        |     +-- Pi adapter (first implementation)
-        |
-        +-- ModelProvider
-        |     +-- local OpenAI-compatible servers
-        |     +-- LM Studio / llama.cpp / others
-        |
-        +-- MemoryRuntime
-              +-- Noop memory
-              +-- AG Memory (future)
+Kripl Studio
+├─ WorkspaceRuntime     files / git / diffs / terminal / tests
+├─ AgentRuntime         Pi first, replaceable later
+├─ ModelProvider        LM Studio / llama.cpp / local OpenAI-compatible
+├─ Tool + Network layer browser / search / GitHub / docs / downloads
+└─ MemoryRuntime        Noop now, AG Memory later
 ```
 
-Runtime operation is intended to remain fully local. Cloud providers may be added later only as explicit opt-in integrations; there must be no silent cloud fallback.
+Model routing and network access are deliberately orthogonal:
+
+```text
+default model routing: local-only
+default network mode:  online
+cloud fallback:        disabled
+```
+
+Planned network modes:
+
+- **Online** — local model, network tools enabled according to permissions.
+- **Restricted** — local model, network requests gated by approval/domain policy.
+- **Offline** — first-party network tools disabled and Pi started with `PI_OFFLINE=1`.
+
+`PI_OFFLINE` is not an OS firewall. Shell commands require a separate sandbox if hard egress blocking is needed.
 
 ## Current bootstrap
 
-The repository currently contains:
-
-- Electron desktop shell;
-- React renderer;
-- secure preload bridge and narrow IPC surface;
-- native Windows folder picker;
-- subsystem contracts in `@kripl/core`;
-- isolated Pi RPC adapter in `@kripl/pi-adapter`;
-- Pi startup defaults that disable update checks and telemetry and force offline mode.
-
-The first UI is intentionally minimal. Explorer, agent chat, Changes/Diff review, terminal, model management, permissions, and memory inspection will be built on top of these boundaries.
+- Electron + React desktop shell
+- secure preload/IPC boundary
+- native Windows workspace picker
+- `AgentRuntime`, `ModelProvider`, `MemoryRuntime`, `WorkspaceRuntime` contracts
+- explicit network/model policy split
+- isolated Pi RPC adapter
+- strict local OpenAI-compatible model discovery
+- Windows NSIS installer scaffold
 
 ## Development
 
 Requirements:
 
-- Node.js 22.19 or newer;
-- Windows 11 is the primary target;
-- Git for Windows / Git Bash will be required when Pi executes Bash-based tools.
-
-Install:
+- Node.js 22.19 or newer
+- Windows 11 as primary target
+- Git for Windows / Git Bash for Bash-based Pi tools
 
 ```powershell
 git clone https://github.com/MaxSquizie/Kripl-Studio.git
 cd Kripl-Studio
 npm install
-```
-
-Run the desktop app:
-
-```powershell
-npm run dev
-```
-
-Static checks:
-
-```powershell
+npm test
 npm run typecheck
 npm run build
+npm run dev
 ```
 
 Build a Windows installer:
@@ -76,22 +67,6 @@ Build a Windows installer:
 ```powershell
 npm run dist:win
 ```
-
-The installer pipeline is scaffolded now; product metadata, icons, signing, and release automation will be finalized after the first functional agent loop is integrated.
-
-## Offline-first runtime policy
-
-Kripl Studio's Pi adapter starts Pi with:
-
-```text
-PI_OFFLINE=1
-PI_TELEMETRY=0
-PI_SKIP_VERSION_CHECK=1
-```
-
-These variables disable Pi startup/update network work, but they are not a general network firewall and do not by themselves prevent a configured remote inference provider from making requests. Kripl Studio will therefore keep the agent composer disabled until a model/provider is explicitly classified as local. A stronger egress guard can be added later as defense in depth.
-
-Features requiring remote network access must be explicit and opt-in; there is no automatic cloud fallback.
 
 ## License
 

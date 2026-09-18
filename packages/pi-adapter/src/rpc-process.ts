@@ -83,7 +83,7 @@ export function createPiEnvironment(options: PiRpcStartOptions): NodeJS.ProcessE
 }
 
 export class PiRpcProcess {
-  private child?: ChildProcessWithoutNullStreams;
+  private child: ChildProcessWithoutNullStreams | undefined;
   private stdoutBuffer = "";
   private stderrBuffer = "";
   private readonly pending = new Map<string, PendingRequest>();
@@ -144,6 +144,20 @@ export class PiRpcProcess {
         if (!error) return;
         this.pending.delete(id);
         reject(error);
+      });
+    });
+  }
+
+  sendOneWay(message: JsonRecord): Promise<void> {
+    const child = this.child;
+    if (!child || !this.running) {
+      return Promise.reject(new Error("Pi RPC process is not running."));
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      child.stdin.write(`${JSON.stringify(message)}\n`, (error) => {
+        if (error) reject(error);
+        else resolve();
       });
     });
   }

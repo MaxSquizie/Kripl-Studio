@@ -1,4 +1,4 @@
-import type { AgentEvent } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse } from "@kripl/core";
 import { contextBridge, ipcRenderer } from "electron";
 
 const IPC = {
@@ -9,6 +9,7 @@ const IPC = {
   agentSend: "kripl:agent-send",
   agentAbort: "kripl:agent-abort",
   agentStop: "kripl:agent-stop",
+  agentRespondInteraction: "kripl:agent-respond-interaction",
   agentEvent: "kripl:agent-event"
 } as const;
 
@@ -53,6 +54,9 @@ const api = {
   abortAgent: () => ipcRenderer.invoke(IPC.agentAbort) as Promise<ActionResult>,
 
   stopAgent: () => ipcRenderer.invoke(IPC.agentStop) as Promise<ActionResult>,
+
+  respondToAgentInteraction: (response: AgentInteractionResponse) =>
+    ipcRenderer.invoke(IPC.agentRespondInteraction, response) as Promise<ActionResult>,
 
   onAgentEvent: (listener: (event: AgentEvent) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: AgentEvent) => listener(payload);

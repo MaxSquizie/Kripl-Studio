@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentStatus } from "@kripl/core";
+import type { AgentEvent, AgentInteractionRequest, AgentInteractionResponse, AgentStatus } from "@kripl/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 interface AppInfo {
@@ -72,6 +72,7 @@ export function App() {
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
   const [tools, setTools] = useState<ToolActivity[]>([]);
   const [thinking, setThinking] = useState("");
+  const [interaction, setInteraction] = useState<AgentInteractionRequest | null>(null);
   const assistantMessageId = useRef<string | null>(null);
 
   useEffect(() => {
@@ -82,6 +83,9 @@ export function App() {
     return window.kripl.onAgentEvent((event: AgentEvent) => {
       if (event.type === "agent.status") {
         setAgentStatus(event.status);
+        if (event.status === "stopped" || event.status === "error") {
+          setInteraction(null);
+        }
         if (event.status === "error") {
           setAgentError(event.message ?? "Pi agent failed.");
         }
@@ -112,16 +116,19 @@ export function App() {
           return;
         }
 
-        let id = assistantMessageId.current;
-        if (!id) {
-          id = crypto.randomUUID();
-          assistantMessageId.current = id;
+        const existingId = assistantMessageId.current;
+        if (!existingId) {
+          const newId = crypto.randomUUID();
+          assistantMessageId.current = newId;
           const initialText = event.phase === "delta" ? event.delta : event.content;
-          setMessages((current) => [...current, { id, role: "assistant", text: initialText }]);
+          setMessages((current) => [
+            ...current,
+            { id: newId, role: "assistant", text: initialText }
+          ]);
           return;
         }
 
-        const targetId = id;
+        const targetId = existingId;
         setMessages((current) =>
           current.map((message) => {
             if (message.id !== targetId) return message;
@@ -134,6 +141,18 @@ export function App() {
             return message;
           })
         );
+        return;
+      }
+
+      if (event.type === "agent.interaction") {
+        setInteraction(event.request);
+        return;
+      }
+
+      if (event.type === "agent.notification") {
+        if (event.level === "error" || event.level === "warning") {
+          setAgentError(event.message);
+        }
         return;
       }
 
@@ -190,6 +209,7 @@ export function App() {
     setTools([]);
     setThinking("");
     setAgentError("");
+    setInteraction(null);
   }
 
   async function probeModels() {
@@ -257,6 +277,16 @@ export function App() {
       setAgentStatus("error");
       setAgentError(result.error ?? "Prompt was rejected.");
     }
+  }
+
+
+  async function respondToInteraction(response: AgentInteractionResponse) {
+    const result = await window.kripl.respondToAgentInteraction(response);
+    if (!result.ok) {
+      setAgentError(result.error ?? "Failed to answer agent permission request.");
+      return;
+    }
+    setInteraction(null);
   }
 
   async function abortAgent() {
@@ -493,6 +523,30 @@ export function App() {
           </div>
 
           <div className="status-card">
+            <span className="eyebrow">Permissions</span>
+            <div className="status-line">
+              <span>Workspace read/write</span>
+              <strong>allow</strong>
+            </div>
+            <div className="status-line">
+              <span>Outside workspace</span>
+              <strong className="muted">ask</strong>
+            </div>
+            <div className="status-line">
+              <span>Sensitive files</span>
+              <strong className="muted">ask</strong>
+            </div>
+            <div className="status-line">
+              <span>Shell commands</span>
+              <strong className="muted">ask</strong>
+            </div>
+            <div className="status-line">
+              <span>Network read/search</span>
+              <strong>allow</strong>
+            </div>
+          </div>
+
+          <div className="status-card">
             <span className="eyebrow">Desktop</span>
             <p className="detail">{appInfo ? `${appInfo.name} ${appInfo.version}` : "Loading…"}</p>
             <p className="detail">{appInfo?.platform ?? "—"}</p>
@@ -510,6 +564,75 @@ export function App() {
           </div>
         </aside>
       </div>
+
+      {interaction && (
+        <div className="interaction-backdrop" role="presentation">
+          <section className="interaction-dialog" role="dialog" aria-modal="true">
+            <span className="eyebrow">Agent permission</span>
+            <h3>{interaction.title}</h3>
+            {interaction.message && <pre>{interaction.message}</pre>}
+
+            {interaction.kind === "confirm" && (
+              <div className="interaction-actions">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => void respondToInteraction({ id: interaction.id, confirmed: false })}
+                >
+                  Block
+                </button>
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={() => void respondToInteraction({ id: interaction.id, confirmed: true })}
+                >
+                  Allow
+                </button>
+              </div>
+            )}
+
+            {interaction.kind === "select" && (
+              <div className="interaction-options">
+                {(interaction.options ?? []).map((option) => (
+                  <button
+                    key={option}
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => void respondToInteraction({ id: interaction.id, value: option })}
+                  >
+                    {option}
+                  </button>
+                ))}
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => void respondToInteraction({ id: interaction.id, cancelled: true })}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
+            {(interaction.kind === "input" || interaction.kind === "editor") && (
+              <>
+                <p className="interaction-note">
+                  This interaction type is not exposed by Kripl yet. It is cancelled fail-closed.
+                </p>
+                <div className="interaction-actions">
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => void respondToInteraction({ id: interaction.id, cancelled: true })}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            )}
+          </section>
+        </div>
+      )}
+
     </div>
   );
 }

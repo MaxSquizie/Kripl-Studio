@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentStatus } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, AgentStatus } from "@kripl/core";
 import { LocalOpenAIProvider } from "@kripl/local-openai-provider";
 import { PiAgentRuntime } from "@kripl/pi-adapter";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
@@ -16,6 +16,7 @@ const IPC = {
   agentSend: "kripl:agent-send",
   agentAbort: "kripl:agent-abort",
   agentStop: "kripl:agent-stop",
+  agentRespondInteraction: "kripl:agent-respond-interaction",
   agentEvent: "kripl:agent-event"
 } as const;
 
@@ -234,6 +235,36 @@ function registerIpc(): void {
       return actionError(error);
     }
   });
+
+
+  ipcMain.handle(
+    IPC.agentRespondInteraction,
+    async (_event, response: unknown): Promise<ActionResult> => {
+      if (!activeAgent) return { ok: false, error: "Pi agent is not started." };
+      if (!response || typeof response !== "object") {
+        return { ok: false, error: "Invalid agent interaction response." };
+      }
+
+      const record = response as Record<string, unknown>;
+      if (typeof record.id !== "string" || !record.id) {
+        return { ok: false, error: "Agent interaction response id is required." };
+      }
+
+      const normalized: AgentInteractionResponse = {
+        id: record.id,
+        ...(typeof record.confirmed === "boolean" ? { confirmed: record.confirmed } : {}),
+        ...(typeof record.value === "string" ? { value: record.value } : {}),
+        ...(record.cancelled === true ? { cancelled: true } : {})
+      };
+
+      try {
+        await activeAgent.respondToInteraction(normalized);
+        return { ok: true };
+      } catch (error) {
+        return actionError(error);
+      }
+    }
+  );
 
   ipcMain.handle(IPC.agentStop, async (): Promise<ActionResult> => {
     try {

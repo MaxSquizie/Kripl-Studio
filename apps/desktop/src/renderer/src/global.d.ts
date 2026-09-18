@@ -1,4 +1,4 @@
-import type { AgentEvent } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse } from "@kripl/core";
 
 export {};
 
@@ -39,6 +39,7 @@ declare global {
       sendAgentMessage(message: string): Promise<ActionResult>;
       abortAgent(): Promise<ActionResult>;
       stopAgent(): Promise<ActionResult>;
+      respondToAgentInteraction(response: AgentInteractionResponse): Promise<ActionResult>;
       onAgentEvent(listener: (event: AgentEvent) => void): () => void;
     };
   }

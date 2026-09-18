@@ -121,3 +121,68 @@
 .composer textarea:not(:disabled) {
   border-color: #34445c;
 }
+
+
+.interaction-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: rgba(4, 7, 10, 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.interaction-dialog {
+  width: min(620px, calc(100vw - 40px));
+  max-height: min(720px, calc(100vh - 40px));
+  overflow: auto;
+  border: 1px solid #3a4656;
+  border-radius: 14px;
+  background: #12171e;
+  padding: 22px;
+  box-shadow: 0 28px 100px rgba(0, 0, 0, 0.5);
+}
+
+.interaction-dialog h3 {
+  margin: 7px 0 12px;
+  color: #e1e6ed;
+  font-size: 18px;
+}
+
+.interaction-dialog pre {
+  max-height: 360px;
+  overflow: auto;
+  margin: 0;
+  border: 1px solid #29323d;
+  border-radius: 9px;
+  background: #0b0f14;
+  padding: 12px;
+  color: #b8c1cd;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 11px/1.55 "Cascadia Code", Consolas, monospace;
+}
+
+.interaction-actions,
+.interaction-options {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 18px;
+}
+
+.secondary-button {
+  border: 1px solid #35404e;
+  border-radius: 8px;
+  background: #171d25;
+  padding: 9px 13px;
+  cursor: pointer;
+}
+
+.interaction-note {
+  color: #8f99a7;
+  font-size: 12px;
+  line-height: 1.5;
+}

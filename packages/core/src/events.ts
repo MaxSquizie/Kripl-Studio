@@ -2,6 +2,26 @@ export type Unsubscribe = () => void;
 
 export type AgentStatus = "idle" | "starting" | "ready" | "running" | "stopping" | "stopped" | "error";
 
+export type AgentInteractionKind = "confirm" | "select" | "input" | "editor";
+
+export interface AgentInteractionRequest {
+  id: string;
+  kind: AgentInteractionKind;
+  title: string;
+  message?: string;
+  options?: string[];
+  placeholder?: string;
+  prefill?: string;
+  timeoutMs?: number;
+}
+
+export interface AgentInteractionResponse {
+  id: string;
+  confirmed?: boolean;
+  value?: string;
+  cancelled?: boolean;
+}
+
 export type AgentEvent =
   | {
       type: "agent.status";
@@ -43,6 +63,15 @@ export type AgentEvent =
       callId: string;
       name: string;
       payload?: unknown;
+    }
+  | {
+      type: "agent.interaction";
+      request: AgentInteractionRequest;
+    }
+  | {
+      type: "agent.notification";
+      level: "info" | "warning" | "error";
+      message: string;
     }
   | {
       type: "agent.raw";

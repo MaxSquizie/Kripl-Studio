@@ -5,6 +5,7 @@ import { PiAgentRuntime } from "@kripl/pi-adapter";
 import { PtyTerminalRuntime } from "@kripl/terminal";
 import { LocalWorkspaceRuntime } from "@kripl/workspace";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserRuntime } from "./browser-runtime.js";
@@ -104,6 +105,11 @@ async function openWorkspacePath(
   path: string,
   options: { resetUi: boolean; remember: boolean }
 ): Promise<WorkspaceDescriptor> {
+  const info = await stat(path);
+  if (!info.isDirectory()) {
+    throw new Error("Workspace path is not a directory.");
+  }
+
   await Promise.all([
     disposeActiveAgent(),
     terminalRuntime.kill()

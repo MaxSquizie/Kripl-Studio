@@ -1,4 +1,8 @@
-import type { AgentEvent, Unsubscribe } from "./events.js";
+import type {
+  AgentEvent,
+  AgentInteractionResponse,
+  Unsubscribe
+} from "./events.js";
 
 export interface AgentStartOptions {
   workspacePath: string;
@@ -17,6 +21,7 @@ export interface AgentRuntime {
   start(options: AgentStartOptions): Promise<void>;
   send(input: AgentInput): Promise<void>;
   stop(): Promise<void>;
+  respondToInteraction(response: AgentInteractionResponse): Promise<void>;
   dispose(): Promise<void>;
   subscribe(listener: AgentEventListener): Unsubscribe;
 }

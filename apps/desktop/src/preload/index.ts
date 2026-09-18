@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInteractionResponse, BrowserState, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
 import { contextBridge, ipcRenderer } from "electron";
 
 const IPC = {
@@ -9,6 +9,9 @@ const IPC = {
   forgetRecentProject: "kripl:forget-recent-project",
   saveDesktopUi: "kripl:save-desktop-ui",
   saveRuntimeSettings: "kripl:save-runtime-settings",
+  contextGetSnapshot: "kripl:context-get-snapshot",
+  contextRetrieveMemory: "kripl:context-retrieve-memory",
+  contextSnapshot: "kripl:context-snapshot",
   workspaceList: "kripl:workspace-list",
   workspaceReadFile: "kripl:workspace-read-file",
   workspaceChanges: "kripl:workspace-changes",
@@ -62,6 +65,19 @@ const api = {
 
   saveRuntimeSettings: (runtime: DesktopRuntimeSettings) =>
     ipcRenderer.invoke(IPC.saveRuntimeSettings, runtime) as Promise<DesktopRuntimeSettings>,
+
+  getContextSnapshot: () =>
+    ipcRenderer.invoke(IPC.contextGetSnapshot) as Promise<ContextInspectorSnapshot>,
+
+  retrieveMemory: (query: string) =>
+    ipcRenderer.invoke(IPC.contextRetrieveMemory, query) as Promise<MemoryItem[]>,
+
+  onContextSnapshot: (listener: (snapshot: ContextInspectorSnapshot) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: ContextInspectorSnapshot) =>
+      listener(payload);
+    ipcRenderer.on(IPC.contextSnapshot, handler);
+    return () => ipcRenderer.removeListener(IPC.contextSnapshot, handler);
+  },
 
   listWorkspace: (path = "") => ipcRenderer.invoke(IPC.workspaceList, path) as Promise<WorkspaceEntry[]>,
 

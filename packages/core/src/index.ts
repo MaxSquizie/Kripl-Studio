@@ -1,3 +1,4 @@
+export * from "./agent-session.js";
 export * from "./context-runtime.js";
 export * from "./desktop-state.js";
 export * from "./terminal-runtime.js";

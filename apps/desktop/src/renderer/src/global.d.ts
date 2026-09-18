@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInteractionResponse, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
 
 export {};
 
@@ -43,10 +43,13 @@ declare global {
         }>;
         error?: string;
       }>;
+      listAgentSessions(): Promise<AgentSessionSummary[]>;
       startAgent(request: {
         endpoint: string;
         modelId: string;
+        sessionPath?: string;
       }): Promise<ActionResult>;
+      getAgentSessionSnapshot(): Promise<AgentSessionSnapshot | null>;
       sendAgentMessage(message: string): Promise<ActionResult>;
       abortAgent(): Promise<ActionResult>;
       stopAgent(): Promise<ActionResult>;

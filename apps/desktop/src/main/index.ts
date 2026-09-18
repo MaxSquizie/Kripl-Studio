@@ -1,10 +1,12 @@
-import type { AgentEvent, AgentInteractionResponse, AgentStatus } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, AgentStatus, BrowserState } from "@kripl/core";
 import { LocalOpenAIProvider } from "@kripl/local-openai-provider";
 import { PiAgentRuntime } from "@kripl/pi-adapter";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { BrowserRuntime } from "./browser-runtime.js";
+import { ToolBridgeServer } from "./tool-bridge.js";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 
@@ -17,7 +19,10 @@ const IPC = {
   agentAbort: "kripl:agent-abort",
   agentStop: "kripl:agent-stop",
   agentRespondInteraction: "kripl:agent-respond-interaction",
-  agentEvent: "kripl:agent-event"
+  agentEvent: "kripl:agent-event",
+  browserGetState: "kripl:browser-get-state",
+  browserSetVisible: "kripl:browser-set-visible",
+  browserState: "kripl:browser-state"
 } as const;
 
 interface AgentStartRequest {
@@ -34,6 +39,21 @@ interface ActionResult {
 let activeAgent: PiAgentRuntime | undefined;
 let activeAgentUnsubscribe: (() => void) | undefined;
 let activeAgentStatus: AgentStatus = "idle";
+let browserRuntime: BrowserRuntime | undefined;
+let toolBridgeServer: ToolBridgeServer | undefined;
+let browserUnsubscribe: (() => void) | undefined;
+
+
+function emptyBrowserState(): BrowserState {
+  return {
+    visible: false,
+    loading: false,
+    url: "",
+    title: "",
+    canGoBack: false,
+    canGoForward: false
+  };
+}
 
 function actionError(error: unknown): ActionResult {
   return {
@@ -189,7 +209,8 @@ function registerIpc(): void {
           baseUrl: localModel.endpoint,
           modelId: localModel.modelId
         },
-        networkMode: "online"
+        networkMode: "online",
+        toolBridge: toolBridgeServer?.getConnection()
       });
 
       activeAgent = agent;
@@ -266,6 +287,18 @@ function registerIpc(): void {
     }
   );
 
+
+  ipcMain.handle(IPC.browserGetState, (): BrowserState => {
+    return browserRuntime?.getState() ?? emptyBrowserState();
+  });
+
+  ipcMain.handle(IPC.browserSetVisible, (_event, visible: unknown): BrowserState => {
+    if (typeof visible !== "boolean") {
+      throw new Error("Browser visibility must be a boolean.");
+    }
+    return browserRuntime?.setVisible(visible) ?? emptyBrowserState();
+  });
+
   ipcMain.handle(IPC.agentStop, async (): Promise<ActionResult> => {
     try {
       await disposeActiveAgent();
@@ -276,16 +309,47 @@ function registerIpc(): void {
   });
 }
 
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
   registerIpc();
-  createWindow();
+  const window = createWindow();
+
+  browserRuntime = new BrowserRuntime(window);
+  toolBridgeServer = new ToolBridgeServer(browserRuntime);
+  await toolBridgeServer.start();
+
+  browserUnsubscribe = browserRuntime.subscribe((state) => {
+    if (!window.webContents.isDestroyed()) {
+      window.webContents.send(IPC.browserState, state);
+    }
+  });
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) {
+      const nextWindow = createWindow();
+      browserUnsubscribe?.();
+      browserRuntime?.dispose();
+      browserRuntime = new BrowserRuntime(nextWindow);
+      void toolBridgeServer?.dispose().then(async () => {
+        if (!browserRuntime) return;
+        toolBridgeServer = new ToolBridgeServer(browserRuntime);
+        await toolBridgeServer.start();
+      });
+      browserUnsubscribe = browserRuntime.subscribe((state) => {
+        if (!nextWindow.webContents.isDestroyed()) {
+          nextWindow.webContents.send(IPC.browserState, state);
+        }
+      });
+    }
   });
 });
 
 app.on("before-quit", () => {
+  browserUnsubscribe?.();
+  browserUnsubscribe = undefined;
+  browserRuntime?.dispose();
+  browserRuntime = undefined;
+  void toolBridgeServer?.dispose();
+  toolBridgeServer = undefined;
   void disposeActiveAgent();
 });
 

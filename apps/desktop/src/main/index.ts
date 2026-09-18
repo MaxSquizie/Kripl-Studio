@@ -286,10 +286,6 @@ function initializeTerminalForwarding(window: BrowserWindow): void {
 async function initializeBrowserRuntime(window: BrowserWindow): Promise<void> {
   browserUnsubscribe?.();
   browserUnsubscribe = undefined;
-  terminalUnsubscribe?.();
-  terminalUnsubscribe = undefined;
-  contextUnsubscribe?.();
-  contextUnsubscribe = undefined;
 
   browserRuntime?.dispose();
   browserRuntime = undefined;

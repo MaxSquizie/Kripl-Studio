@@ -697,3 +697,141 @@ button {
   background: rgba(103, 163, 143, 0.12);
   color: #9bc8b9;
 }
+
+
+.runtime-settings-card {
+  gap: 12px;
+  border-color: #29443b;
+  background:
+    linear-gradient(180deg, rgba(34, 67, 57, 0.14), transparent 72%),
+    #101715;
+}
+
+.settings-field {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-field > span {
+  color: #83978f;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.settings-field select,
+.permission-setting select {
+  border: 1px solid #314b42;
+  border-radius: 7px;
+  background: #0d1512;
+  color: #bfd5cd;
+  outline: none;
+}
+
+.settings-field select {
+  width: 100%;
+  padding: 8px 9px;
+  font-size: 11px;
+}
+
+.settings-field select:focus,
+.permission-setting select:focus {
+  border-color: #5b957f;
+  box-shadow: 0 0 0 2px rgba(91, 149, 127, 0.13);
+}
+
+.settings-hint {
+  margin: 0;
+  color: #70867e;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.permission-settings {
+  border: 1px solid #263931;
+  border-radius: 8px;
+  background: #0c1210;
+  overflow: hidden;
+}
+
+.permission-settings > summary {
+  cursor: pointer;
+  padding: 9px 10px;
+  color: #9ab6ac;
+  font-size: 11px;
+  font-weight: 600;
+  user-select: none;
+}
+
+.permission-settings[open] > summary {
+  border-bottom: 1px solid #263931;
+}
+
+.permission-settings-body {
+  display: grid;
+  max-height: 360px;
+  overflow: auto;
+  padding: 5px 0 8px;
+}
+
+.permission-group {
+  padding: 8px 10px 4px;
+  color: #5f7f73;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.permission-setting {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 78px;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 4px 10px;
+}
+
+.permission-setting:hover {
+  background: rgba(81, 137, 118, 0.08);
+}
+
+.permission-setting > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  color: #aabbb5;
+  font-size: 10px;
+}
+
+.permission-setting small {
+  color: #688078;
+  font-size: 8px;
+  font-weight: 500;
+}
+
+.permission-setting select {
+  width: 78px;
+  padding: 5px 6px;
+  font-size: 10px;
+}
+
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.runtime-settings-card .primary-button:not(:disabled) {
+  border-color: #477967;
+  background: #1c4437;
+  color: #d6e8e1;
+}
+
+.runtime-settings-card .primary-button:not(:disabled):hover {
+  background: #245444;
+}
+
+.runtime-settings-card .secondary-button:not(:disabled):hover {
+  border-color: #3d594f;
+  background: #17221e;
+}

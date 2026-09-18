@@ -7,7 +7,7 @@ export function RecentProjectsCard({
   onForget
 }: {
   projects: RecentProject[];
-  currentPath?: string;
+  currentPath: string | undefined;
   onOpen(path: string): void;
   onForget(path: string): void;
 }) {

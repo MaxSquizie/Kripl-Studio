@@ -5,7 +5,8 @@ interface AppInfo {
   name: string;
   version: string;
   platform: string;
-  offlineFirst: boolean;
+  networkMode: "online" | "restricted" | "offline";
+  modelRouting: "local-only" | "allow-remote";
 }
 
 interface LocalModel {
@@ -276,7 +277,7 @@ export function App() {
         <div className="workspace-title">{workspaceName}</div>
         <div className="runtime-pill">
           <span className="status-dot" />
-          offline-first
+          local model · network online
         </div>
       </header>
 
@@ -426,7 +427,11 @@ export function App() {
               <strong className="muted">disabled</strong>
             </div>
             <div className="status-line">
-              <span>Cloud fallback</span>
+              <span>Network</span>
+              <strong>{appInfo?.networkMode ?? "online"}</strong>
+            </div>
+            <div className="status-line">
+              <span>Cloud model fallback</span>
               <strong>off</strong>
             </div>
           </div>
@@ -498,7 +503,8 @@ export function App() {
             <ol>
               <li>Replace placeholder Explorer with real workspace files.</li>
               <li>Add project-wide Changes/Diff review.</li>
-              <li>Add permission policy for shell and edits.</li>
+              <li>Add permission policy for shell, edits, and network.</li>
+              <li>Add browser/search network tools.</li>
               <li>Add terminal and session persistence UI.</li>
             </ol>
           </div>

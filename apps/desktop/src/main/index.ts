@@ -1,6 +1,9 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import type { AgentEvent, AgentStatus } from "@kripl/core";
 import { LocalOpenAIProvider } from "@kripl/local-openai-provider";
-import { dirname, join } from "node:path";
+import { PiAgentRuntime } from "@kripl/pi-adapter";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { stat } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
@@ -8,8 +11,99 @@ const currentDir = dirname(fileURLToPath(import.meta.url));
 const IPC = {
   appInfo: "kripl:app-info",
   pickWorkspace: "kripl:pick-workspace",
-  probeLocalModels: "kripl:probe-local-models"
+  probeLocalModels: "kripl:probe-local-models",
+  agentStart: "kripl:agent-start",
+  agentSend: "kripl:agent-send",
+  agentAbort: "kripl:agent-abort",
+  agentStop: "kripl:agent-stop",
+  agentEvent: "kripl:agent-event"
 } as const;
+
+interface AgentStartRequest {
+  workspacePath: string;
+  endpoint: string;
+  modelId: string;
+}
+
+interface ActionResult {
+  ok: boolean;
+  error?: string;
+}
+
+let activeAgent: PiAgentRuntime | undefined;
+let activeAgentUnsubscribe: (() => void) | undefined;
+let activeAgentStatus: AgentStatus = "idle";
+
+function actionError(error: unknown): ActionResult {
+  return {
+    ok: false,
+    error: error instanceof Error ? error.message : String(error)
+  };
+}
+
+function isAgentStartRequest(value: unknown): value is AgentStartRequest {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.workspacePath === "string" &&
+    record.workspacePath.length > 0 &&
+    record.workspacePath.length <= 32_768 &&
+    typeof record.endpoint === "string" &&
+    record.endpoint.length > 0 &&
+    record.endpoint.length <= 2_048 &&
+    typeof record.modelId === "string" &&
+    record.modelId.length > 0 &&
+    record.modelId.length <= 512
+  );
+}
+
+async function validateWorkspace(path: string): Promise<string> {
+  const absolutePath = resolve(path);
+  const info = await stat(absolutePath);
+  if (!info.isDirectory()) {
+    throw new Error("Selected workspace is not a directory.");
+  }
+  return absolutePath;
+}
+
+async function validateLocalModel(endpoint: string, modelId: string) {
+  const provider = new LocalOpenAIProvider({
+    baseUrl: endpoint,
+    requestTimeoutMs: 2_500
+  });
+  const models = await provider.listModels();
+  const selected = models.find((model) => model.id === modelId);
+
+  if (!selected) {
+    throw new Error(`Local model "${modelId}" is no longer available from the selected endpoint.`);
+  }
+
+  return {
+    endpoint: provider.baseUrl,
+    modelId: selected.id
+  };
+}
+
+async function disposeActiveAgent(): Promise<void> {
+  const agent = activeAgent;
+  activeAgent = undefined;
+  activeAgentUnsubscribe?.();
+  activeAgentUnsubscribe = undefined;
+  activeAgentStatus = "stopped";
+
+  if (agent) {
+    await agent.dispose();
+  }
+}
+
+function forwardAgentEvent(target: Electron.WebContents, event: AgentEvent): void {
+  if (event.type === "agent.status") {
+    activeAgentStatus = event.status;
+  }
+
+  if (event.type === "agent.raw" || target.isDestroyed()) return;
+  target.send(IPC.agentEvent, event);
+}
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -42,7 +136,8 @@ function registerIpc(): void {
     name: app.getName(),
     version: app.getVersion(),
     platform: process.platform,
-    offlineFirst: true
+    networkMode: "online",
+    modelRouting: "local-only"
   }));
 
   ipcMain.handle(IPC.pickWorkspace, async () => {
@@ -73,6 +168,81 @@ function registerIpc(): void {
       };
     }
   });
+
+  ipcMain.handle(IPC.agentStart, async (event, request: unknown): Promise<ActionResult> => {
+    if (!isAgentStartRequest(request)) {
+      return { ok: false, error: "Invalid agent start request." };
+    }
+
+    try {
+      const workspacePath = await validateWorkspace(request.workspacePath);
+      const localModel = await validateLocalModel(request.endpoint, request.modelId);
+
+      await disposeActiveAgent();
+
+      const userData = app.getPath("userData");
+      const agent = new PiAgentRuntime({
+        agentDir: join(userData, "pi-agent"),
+        sessionDir: join(userData, "pi-sessions"),
+        localModel: {
+          baseUrl: localModel.endpoint,
+          modelId: localModel.modelId
+        },
+        networkMode: "online"
+      });
+
+      activeAgent = agent;
+      activeAgentStatus = "starting";
+      activeAgentUnsubscribe = agent.subscribe((agentEvent) => {
+        forwardAgentEvent(event.sender, agentEvent);
+      });
+
+      await agent.start({ workspacePath });
+      return { ok: true };
+    } catch (error) {
+      await disposeActiveAgent();
+      return actionError(error);
+    }
+  });
+
+  ipcMain.handle(IPC.agentSend, async (_event, message: unknown): Promise<ActionResult> => {
+    if (typeof message !== "string" || !message.trim() || message.length > 1_000_000) {
+      return { ok: false, error: "Invalid agent message." };
+    }
+    if (!activeAgent) {
+      return { ok: false, error: "Pi agent is not started." };
+    }
+    if (activeAgentStatus !== "ready") {
+      return { ok: false, error: `Pi agent is not ready (status: ${activeAgentStatus}).` };
+    }
+
+    try {
+      await activeAgent.send({ text: message });
+      return { ok: true };
+    } catch (error) {
+      return actionError(error);
+    }
+  });
+
+  ipcMain.handle(IPC.agentAbort, async (): Promise<ActionResult> => {
+    if (!activeAgent) return { ok: true };
+
+    try {
+      await activeAgent.stop();
+      return { ok: true };
+    } catch (error) {
+      return actionError(error);
+    }
+  });
+
+  ipcMain.handle(IPC.agentStop, async (): Promise<ActionResult> => {
+    try {
+      await disposeActiveAgent();
+      return { ok: true };
+    } catch (error) {
+      return actionError(error);
+    }
+  });
 }
 
 void app.whenReady().then(() => {
@@ -82,6 +252,10 @@ void app.whenReady().then(() => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+app.on("before-quit", () => {
+  void disposeActiveAgent();
 });
 
 app.on("window-all-closed", () => {

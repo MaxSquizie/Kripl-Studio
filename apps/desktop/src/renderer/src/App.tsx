@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import type { AgentEvent, AgentStatus } from "@kripl/core";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 interface AppInfo {
   name: string;
   version: string;
   platform: string;
-  offlineFirst: boolean;
+  networkMode: "online" | "restricted" | "offline";
+  modelRouting: "local-only" | "allow-remote";
 }
 
 interface LocalModel {
@@ -12,6 +14,25 @@ interface LocalModel {
   id: string;
   name: string;
   local: boolean;
+}
+
+interface TranscriptMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  text: string;
+}
+
+interface ToolActivity {
+  callId: string;
+  name: string;
+  phase: "started" | "updated" | "completed" | "failed";
+  payload?: unknown;
+}
+
+interface AgentBinding {
+  workspacePath: string;
+  endpoint: string;
+  modelId: string;
 }
 
 type ProbeState =
@@ -27,15 +48,110 @@ function basename(path: string): string {
   return parts.at(-1) ?? path;
 }
 
+function payloadPreview(payload: unknown): string {
+  if (payload === undefined) return "";
+  try {
+    const serialized = JSON.stringify(payload, null, 2);
+    if (typeof serialized !== "string") return String(payload);
+    return serialized.length > 1800 ? `${serialized.slice(0, 1800)}\n…` : serialized;
+  } catch {
+    return String(payload);
+  }
+}
+
 export function App() {
   const [workspace, setWorkspace] = useState<string | null>(null);
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [endpoint, setEndpoint] = useState(DEFAULT_LOCAL_ENDPOINT);
   const [probe, setProbe] = useState<ProbeState>({ status: "idle", models: [] });
   const [selectedModel, setSelectedModel] = useState("");
+  const [agentStatus, setAgentStatus] = useState<AgentStatus>("idle");
+  const [agentError, setAgentError] = useState("");
+  const [binding, setBinding] = useState<AgentBinding | null>(null);
+  const [composerText, setComposerText] = useState("");
+  const [messages, setMessages] = useState<TranscriptMessage[]>([]);
+  const [tools, setTools] = useState<ToolActivity[]>([]);
+  const [thinking, setThinking] = useState("");
+  const assistantMessageId = useRef<string | null>(null);
 
   useEffect(() => {
     void window.kripl.getAppInfo().then(setAppInfo);
+  }, []);
+
+  useEffect(() => {
+    return window.kripl.onAgentEvent((event: AgentEvent) => {
+      if (event.type === "agent.status") {
+        setAgentStatus(event.status);
+        if (event.status === "error") {
+          setAgentError(event.message ?? "Pi agent failed.");
+        }
+        return;
+      }
+
+      if (event.type === "agent.turn" && event.phase === "started") {
+        assistantMessageId.current = null;
+        return;
+      }
+
+      if (event.type === "agent.stream" && event.channel === "thinking") {
+        if (event.phase === "started") {
+          setThinking("");
+        } else if (event.phase === "delta") {
+          setThinking((current) => current + event.delta);
+        } else {
+          setThinking(event.content);
+        }
+        return;
+      }
+
+      if (event.type === "agent.stream" && event.channel === "text") {
+        if (event.phase === "started") {
+          const id = crypto.randomUUID();
+          assistantMessageId.current = id;
+          setMessages((current) => [...current, { id, role: "assistant", text: "" }]);
+          return;
+        }
+
+        let id = assistantMessageId.current;
+        if (!id) {
+          id = crypto.randomUUID();
+          assistantMessageId.current = id;
+          const initialText = event.phase === "delta" ? event.delta : event.content;
+          setMessages((current) => [...current, { id, role: "assistant", text: initialText }]);
+          return;
+        }
+
+        const targetId = id;
+        setMessages((current) =>
+          current.map((message) => {
+            if (message.id !== targetId) return message;
+            if (event.phase === "delta") {
+              return { ...message, text: message.text + event.delta };
+            }
+            if (!message.text) {
+              return { ...message, text: event.content };
+            }
+            return message;
+          })
+        );
+        return;
+      }
+
+      if (event.type === "agent.tool") {
+        setTools((current) => {
+          const existing = current.findIndex((tool) => tool.callId === event.callId);
+          const next: ToolActivity = {
+            callId: event.callId,
+            name: event.name,
+            phase: event.phase,
+            ...(event.payload === undefined ? {} : { payload: event.payload })
+          };
+
+          if (existing < 0) return [...current, next];
+          return current.map((tool, index) => (index === existing ? next : tool));
+        });
+      }
+    });
   }, []);
 
   const workspaceName = useMemo(
@@ -43,11 +159,37 @@ export function App() {
     [workspace]
   );
 
-  const modelReady = probe.status === "ready" && probe.models.length > 0;
+  const modelReady =
+    probe.status === "ready" &&
+    probe.models.length > 0 &&
+    probe.models.some((model) => model.id === selectedModel);
+
+  const bindingMatchesSelection =
+    Boolean(binding) &&
+    binding?.workspacePath === workspace &&
+    binding?.endpoint === endpoint &&
+    binding?.modelId === selectedModel;
+
+  const canStartAgent = Boolean(workspace && modelReady) && agentStatus !== "starting";
+  const canSend = bindingMatchesSelection && agentStatus === "ready";
+
+  async function disconnectAgent() {
+    await window.kripl.stopAgent();
+    setAgentStatus("stopped");
+    setBinding(null);
+    assistantMessageId.current = null;
+  }
 
   async function openWorkspace() {
     const selected = await window.kripl.pickWorkspace();
-    if (selected) setWorkspace(selected);
+    if (!selected) return;
+
+    if (binding) await disconnectAgent();
+    setWorkspace(selected);
+    setMessages([]);
+    setTools([]);
+    setThinking("");
+    setAgentError("");
   }
 
   async function probeModels() {
@@ -68,6 +210,63 @@ export function App() {
     });
   }
 
+  async function startAgent() {
+    if (!workspace || !modelReady || !selectedModel) return;
+
+    setAgentError("");
+    setAgentStatus("starting");
+    setMessages([]);
+    setTools([]);
+    setThinking("");
+    assistantMessageId.current = null;
+
+    const result = await window.kripl.startAgent({
+      workspacePath: workspace,
+      endpoint,
+      modelId: selectedModel
+    });
+
+    if (!result.ok) {
+      setAgentStatus("error");
+      setAgentError(result.error ?? "Failed to start Pi agent.");
+      setBinding(null);
+      return;
+    }
+
+    setBinding({ workspacePath: workspace, endpoint, modelId: selectedModel });
+    setAgentStatus("ready");
+  }
+
+  async function sendPrompt() {
+    const text = composerText.trim();
+    if (!text || !canSend) return;
+
+    const userMessage: TranscriptMessage = {
+      id: crypto.randomUUID(),
+      role: "user",
+      text
+    };
+
+    setMessages((current) => [...current, userMessage]);
+    setComposerText("");
+    setAgentError("");
+    assistantMessageId.current = null;
+
+    const result = await window.kripl.sendAgentMessage(text);
+    if (!result.ok) {
+      setAgentStatus("error");
+      setAgentError(result.error ?? "Prompt was rejected.");
+    }
+  }
+
+  async function abortAgent() {
+    const result = await window.kripl.abortAgent();
+    if (!result.ok) {
+      setAgentStatus("error");
+      setAgentError(result.error ?? "Failed to stop the current run.");
+    }
+  }
+
   return (
     <div className="app-shell">
       <header className="titlebar">
@@ -78,7 +277,7 @@ export function App() {
         <div className="workspace-title">{workspaceName}</div>
         <div className="runtime-pill">
           <span className="status-dot" />
-          offline-first
+          local model · network online
         </div>
       </header>
 
@@ -118,40 +317,88 @@ export function App() {
               <span className="eyebrow">Agent workspace</span>
               <h1>{workspace ? workspaceName : "Start locally"}</h1>
             </div>
-            <span className="engine-label">Pi adapter · disconnected</span>
+            <span className="engine-label">Pi adapter · {agentStatus}</span>
           </div>
 
           <div className="conversation">
-            <section className="welcome-card">
-              <span className="eyebrow">Kripl Studio bootstrap</span>
-              <h2>Local coding without a cloud dependency.</h2>
-              <p>
-                The desktop shell is separated from the agent, model, memory, and workspace
-                runtimes. The local-model gate now accepts only loopback OpenAI-compatible
-                endpoints; Pi will be connected after a local model is selected.
-              </p>
-              <div className="capability-row">
-                <span>AgentRuntime</span>
-                <span>ModelProvider</span>
-                <span>MemoryRuntime</span>
-                <span>WorkspaceRuntime</span>
+            {messages.length === 0 && tools.length === 0 ? (
+              <section className="welcome-card">
+                <span className="eyebrow">Kripl Studio</span>
+                <h2>Local model → Pi → workspace.</h2>
+                <p>
+                  Open a project, connect a loopback OpenAI-compatible model server, then start
+                  Pi. The selected model is written only to Kripl Studio's isolated Pi config;
+                  your normal Pi configuration is not modified.
+                </p>
+                <div className="capability-row">
+                  <span>AgentRuntime</span>
+                  <span>Local Model</span>
+                  <span>Pi RPC</span>
+                  <span>MemoryRuntime</span>
+                </div>
+              </section>
+            ) : (
+              <div className="transcript">
+                {messages.map((message) => (
+                  <article className={`chat-message ${message.role}`} key={message.id}>
+                    <div className="message-role">
+                      {message.role === "user" ? "You" : message.role === "assistant" ? "Kripl" : "System"}
+                    </div>
+                    <div className="message-text">{message.text || "…"}</div>
+                  </article>
+                ))}
+
+                {thinking && (
+                  <details className="thinking-card">
+                    <summary>Reasoning</summary>
+                    <div>{thinking}</div>
+                  </details>
+                )}
+
+                {tools.map((tool) => (
+                  <details className={`tool-card ${tool.phase}`} key={tool.callId}>
+                    <summary>
+                      <span>{tool.name}</span>
+                      <span>{tool.phase}</span>
+                    </summary>
+                    {tool.payload !== undefined && <pre>{payloadPreview(tool.payload)}</pre>}
+                  </details>
+                ))}
               </div>
-            </section>
+            )}
+
+            {agentError && <div className="agent-error">{agentError}</div>}
           </div>
 
           <div className="composer">
             <textarea
-              disabled
+              disabled={!canSend}
               rows={2}
+              value={composerText}
+              onChange={(event) => setComposerText(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  void sendPrompt();
+                }
+              }}
               placeholder={
-                modelReady && workspace
-                  ? "Local model selected. Pi session wiring is the next step…"
-                  : "Open a project and connect a local model first…"
+                canSend
+                  ? "Ask Kripl to inspect or change the project…"
+                  : agentStatus === "running"
+                    ? "Agent is working…"
+                    : "Open a project, connect a local model, and start Pi…"
               }
             />
-            <button type="button" disabled>
-              Send
-            </button>
+            {agentStatus === "running" || agentStatus === "stopping" ? (
+              <button type="button" className="stop-button" onClick={() => void abortAgent()}>
+                Stop
+              </button>
+            ) : (
+              <button type="button" disabled={!canSend || !composerText.trim()} onClick={() => void sendPrompt()}>
+                Send
+              </button>
+            )}
           </div>
         </main>
 
@@ -171,14 +418,20 @@ export function App() {
             </div>
             <div className="status-line">
               <span>Agent</span>
-              <strong className="muted">not started</strong>
+              <strong className={bindingMatchesSelection && agentStatus === "ready" ? "" : "muted"}>
+                {agentStatus}
+              </strong>
             </div>
             <div className="status-line">
               <span>Memory</span>
               <strong className="muted">disabled</strong>
             </div>
             <div className="status-line">
-              <span>Cloud fallback</span>
+              <span>Network</span>
+              <strong>{appInfo?.networkMode ?? "online"}</strong>
+            </div>
+            <div className="status-line">
+              <span>Cloud model fallback</span>
               <strong>off</strong>
             </div>
           </div>
@@ -224,6 +477,19 @@ export function App() {
                 </select>
               </>
             )}
+
+            <button
+              className="agent-start-button"
+              type="button"
+              disabled={!canStartAgent}
+              onClick={() => void startAgent()}
+            >
+              {agentStatus === "starting"
+                ? "Starting Pi…"
+                : bindingMatchesSelection
+                  ? "Restart Pi agent"
+                  : "Start Pi agent"}
+            </button>
           </div>
 
           <div className="status-card">
@@ -235,10 +501,11 @@ export function App() {
           <div className="status-card">
             <span className="eyebrow">Next</span>
             <ol>
-              <li>Bind selected local model to Pi.</li>
-              <li>Start/stop Pi RPC per workspace.</li>
-              <li>Normalize streaming agent/tool events.</li>
-              <li>Enable the composer.</li>
+              <li>Replace placeholder Explorer with real workspace files.</li>
+              <li>Add project-wide Changes/Diff review.</li>
+              <li>Add permission policy for shell, edits, and network.</li>
+              <li>Add browser/search network tools.</li>
+              <li>Add terminal and session persistence UI.</li>
             </ol>
           </div>
         </aside>

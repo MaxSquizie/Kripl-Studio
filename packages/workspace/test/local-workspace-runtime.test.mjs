@@ -102,6 +102,7 @@ test("reports modified and untracked Git changes with textual diffs", async () =
     assert.equal(modified?.status, "modified");
     assert.equal(modified?.unstaged, true);
     assert.equal(untracked?.status, "untracked");
+    assert.equal(untracked?.unstaged, true);
 
     const modifiedDiff = await runtime.getDiff("src/index.ts");
     assert.match(modifiedDiff.patch, /value = 1/);

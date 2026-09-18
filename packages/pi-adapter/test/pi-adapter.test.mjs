@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createPiEnvironment } from "../dist/rpc-process.js";
+import { writePiPermissionGate } from "../dist/pi-permission-gate.js";
 
 import { normalizePiEvent } from "../dist/pi-event-normalizer.js";
 import {
@@ -141,4 +142,69 @@ test("explicit offline mode enables PI_OFFLINE without changing model routing", 
   assert.equal(environment.PI_OFFLINE, "1");
   assert.equal(environment.PI_TELEMETRY, "0");
   assert.equal(environment.PI_SKIP_VERSION_CHECK, "1");
+});
+
+
+test("writes the Kripl permission extension and default policy", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "kripl-permissions-"));
+
+  try {
+    await writePiPermissionGate(directory);
+
+    const policy = JSON.parse(await readFile(join(directory, "kripl-permissions.json"), "utf8"));
+    const extension = await readFile(
+      join(directory, "extensions", "kripl-permissions.ts"),
+      "utf8"
+    );
+
+    assert.equal(policy.rules["filesystem.write.workspace"], "allow");
+    assert.equal(policy.rules["filesystem.write.outside"], "ask");
+    assert.equal(policy.rules["shell.dangerous"], "ask");
+    assert.match(extension, /pi\.on\("tool_call"/);
+    assert.match(extension, /Kripl permission/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("normalizes Pi confirm requests into generic agent interactions", () => {
+  assert.deepEqual(
+    normalizePiEvent({
+      type: "extension_ui_request",
+      id: "permission-1",
+      method: "confirm",
+      title: "Kripl permission · shell.dangerous",
+      message: "Allow dangerous shell command?\n\nrm -rf build"
+    }),
+    [
+      {
+        type: "agent.interaction",
+        request: {
+          id: "permission-1",
+          kind: "confirm",
+          title: "Kripl permission · shell.dangerous",
+          message: "Allow dangerous shell command?\n\nrm -rf build"
+        }
+      }
+    ]
+  );
+});
+
+test("normalizes Pi extension notifications", () => {
+  assert.deepEqual(
+    normalizePiEvent({
+      type: "extension_ui_request",
+      id: "notice-1",
+      method: "notify",
+      message: "Command blocked",
+      notifyType: "warning"
+    }),
+    [
+      {
+        type: "agent.notification",
+        level: "warning",
+        message: "Command blocked"
+      }
+    ]
+  );
 });

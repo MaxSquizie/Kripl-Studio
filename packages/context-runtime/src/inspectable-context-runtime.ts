@@ -64,6 +64,47 @@ function cloneMemoryItem(item: MemoryItem): MemoryItem {
   return { ...item };
 }
 
+function truncateText(value: string, limit = 4_000): string {
+  return value.length <= limit ? value : value.slice(0, limit) + "\n…";
+}
+
+function payloadPreview(payload: unknown): string | undefined {
+  if (payload === undefined) return undefined;
+  try {
+    const serialized = JSON.stringify(payload);
+    if (typeof serialized !== "string") return truncateText(String(payload), 2_500);
+    return truncateText(serialized, 2_500);
+  } catch {
+    return truncateText(String(payload), 2_500);
+  }
+}
+
+function sanitizeEvent(event: RuntimeEvent): RuntimeEvent {
+  if (event.type === "user.message") {
+    return { ...event, text: truncateText(event.text) };
+  }
+  if (event.type === "agent.message") {
+    return { ...event, text: truncateText(event.text) };
+  }
+  if (event.type === "agent.notification") {
+    return { ...event, message: truncateText(event.message, 2_000) };
+  }
+  if (event.type === "agent.stream" && event.phase === "completed") {
+    return { ...event, content: truncateText(event.content) };
+  }
+  if (event.type === "agent.tool") {
+    const preview = payloadPreview(event.payload);
+    return {
+      ...event,
+      ...(preview === undefined ? {} : { payload: preview })
+    };
+  }
+  if (event.type === "memory.query") {
+    return { ...event, text: truncateText(event.text, 2_000) };
+  }
+  return event;
+}
+
 export class InspectableContextRuntime implements ContextRuntime {
   readonly id = "context:inspector";
 
@@ -111,7 +152,10 @@ export class InspectableContextRuntime implements ContextRuntime {
     };
 
     if (shouldRetainEvent(event)) {
-      this.append(envelope);
+      this.append({
+        ...envelope,
+        event: sanitizeEvent(event)
+      });
     }
 
     if (shouldObserveMemory(event)) {

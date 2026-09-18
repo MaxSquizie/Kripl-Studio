@@ -14,7 +14,7 @@ export const DEFAULT_PERMISSION_POLICY: PermissionPolicy = {
     "filesystem.write.workspace": "allow",
     "filesystem.write.sensitive": "ask",
     "filesystem.write.outside": "ask",
-    "shell.safe": "allow",
+    "shell.safe": "ask",
     "shell.dangerous": "ask",
     "network.search": "allow",
     "network.read": "allow",

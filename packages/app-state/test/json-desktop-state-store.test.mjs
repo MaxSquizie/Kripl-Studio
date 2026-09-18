@@ -25,6 +25,9 @@ test("corrupt state files fail closed to defaults", async () => {
       workspaceView: { type: "agent" },
       expandedDirectories: []
     });
+    assert.equal(state.runtime.networkMode, "online");
+    assert.equal(state.runtime.modelRouting, "local-only");
+    assert.equal(state.runtime.permissions.rules["network.read"], "allow");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -120,6 +123,62 @@ test("forgetting the active recent workspace clears last-workspace UI state", as
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("runtime settings persist independently from workspace UI", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "kripl-state-"));
+  const file = join(directory, "desktop-state.json");
+  const store = new JsonDesktopStateStore(file);
+
+  try {
+    await store.setRuntimeSettings({
+      networkMode: "restricted",
+      modelRouting: "local-only",
+      permissions: {
+        version: 1,
+        rules: {
+          "filesystem.read.workspace": "allow",
+          "network.read": "deny"
+        }
+      }
+    });
+
+    await store.clearLastWorkspace();
+
+    const reloaded = await new JsonDesktopStateStore(file).load();
+    assert.equal(reloaded.runtime.networkMode, "restricted");
+    assert.equal(reloaded.runtime.modelRouting, "local-only");
+    assert.equal(reloaded.runtime.permissions.rules["network.read"], "deny");
+    assert.equal(reloaded.runtime.permissions.rules["filesystem.read.workspace"], "allow");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("malformed runtime settings fall back to safe defaults", () => {
+  const state = normalizeDesktopPersistenceState({
+    version: 1,
+    recentProjects: [],
+    ui: {
+      workspaceView: { type: "agent" },
+      expandedDirectories: []
+    },
+    runtime: {
+      networkMode: "warp-speed",
+      modelRouting: "mystery",
+      permissions: {
+        version: 1,
+        rules: {
+          "unknown.scope": "allow"
+        }
+      }
+    }
+  });
+
+  assert.equal(state.runtime.networkMode, "online");
+  assert.equal(state.runtime.modelRouting, "local-only");
+  assert.equal(state.runtime.permissions.rules["network.search"], "allow");
+  assert.equal(state.runtime.permissions.rules["tool.unknown"], "ask");
 });
 
 test("normalization limits recent projects and rejects malformed UI data", () => {

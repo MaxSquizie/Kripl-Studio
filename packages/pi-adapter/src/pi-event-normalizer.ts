@@ -1,4 +1,4 @@
-import type { AgentEvent } from "@kripl/core";
+import type { AgentEvent, AgentInteractionKind, AgentInteractionRequest } from "@kripl/core";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -8,6 +8,36 @@ function isRecord(value: unknown): value is JsonRecord {
 
 function contentIndex(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function normalizeExtensionUiRequest(event: JsonRecord): AgentEvent[] {
+  if (typeof event.id !== "string" || typeof event.method !== "string") return [];
+
+  if (event.method === "notify" && typeof event.message === "string") {
+    const level =
+      event.notifyType === "warning" || event.notifyType === "error" ? event.notifyType : "info";
+    return [{ type: "agent.notification", level, message: event.message }];
+  }
+
+  const supported = new Set<AgentInteractionKind>(["confirm", "select", "input", "editor"]);
+  if (!supported.has(event.method as AgentInteractionKind)) return [];
+
+  const request: AgentInteractionRequest = {
+    id: event.id,
+    kind: event.method as AgentInteractionKind,
+    title: typeof event.title === "string" ? event.title : "Agent request",
+    ...(typeof event.message === "string" ? { message: event.message } : {}),
+    ...(Array.isArray(event.options) && event.options.every((item) => typeof item === "string")
+      ? { options: event.options as string[] }
+      : {}),
+    ...(typeof event.placeholder === "string" ? { placeholder: event.placeholder } : {}),
+    ...(typeof event.prefill === "string" ? { prefill: event.prefill } : {}),
+    ...(typeof event.timeout === "number" && Number.isFinite(event.timeout)
+      ? { timeoutMs: event.timeout }
+      : {})
+  };
+
+  return [{ type: "agent.interaction", request }];
 }
 
 export function normalizePiEvent(event: JsonRecord): AgentEvent[] {
@@ -25,6 +55,9 @@ export function normalizePiEvent(event: JsonRecord): AgentEvent[] {
 
     case "turn_end":
       return [{ type: "agent.turn", phase: "completed" }];
+
+    case "extension_ui_request":
+      return normalizeExtensionUiRequest(event);
 
     case "message_update": {
       if (!isRecord(event.assistantMessageEvent)) return [];

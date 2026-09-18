@@ -120,7 +120,7 @@ function normalizeRuntime(value: unknown): DesktopRuntimeSettings {
       ? record.networkMode
       : fallback.networkMode;
   const modelRouting =
-    record.modelRouting === "local-only" || record.modelRouting === "allow-remote"
+    record.modelRouting === "local-only"
       ? record.modelRouting
       : fallback.modelRouting;
 

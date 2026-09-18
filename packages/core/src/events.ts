@@ -14,6 +14,30 @@ export type AgentEvent =
       text: string;
     }
   | {
+      type: "agent.turn";
+      phase: "started" | "completed";
+    }
+  | {
+      type: "agent.stream";
+      channel: "text" | "thinking";
+      phase: "started";
+      contentIndex: number;
+    }
+  | {
+      type: "agent.stream";
+      channel: "text" | "thinking";
+      phase: "delta";
+      contentIndex: number;
+      delta: string;
+    }
+  | {
+      type: "agent.stream";
+      channel: "text" | "thinking";
+      phase: "completed";
+      contentIndex: number;
+      content: string;
+    }
+  | {
       type: "agent.tool";
       phase: "started" | "updated" | "completed" | "failed";
       callId: string;

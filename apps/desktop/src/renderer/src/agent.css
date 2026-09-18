@@ -1,0 +1,123 @@
+.transcript {
+  display: grid;
+  gap: 14px;
+  width: min(880px, 100%);
+  margin: 0 auto;
+}
+
+.chat-message {
+  display: grid;
+  gap: 7px;
+  border: 1px solid #252d37;
+  border-radius: 12px;
+  background: #12171e;
+  padding: 14px 16px;
+}
+
+.chat-message.user {
+  margin-left: min(12%, 90px);
+  background: #171d27;
+}
+
+.chat-message.assistant {
+  margin-right: min(8%, 60px);
+}
+
+.message-role {
+  color: #778394;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.message-text,
+.thinking-card > div {
+  color: #d1d7df;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.58;
+  font-size: 13px;
+}
+
+.thinking-card,
+.tool-card {
+  border: 1px solid #252e39;
+  border-radius: 9px;
+  background: #0f141a;
+  color: #96a0ae;
+  font-size: 12px;
+}
+
+.thinking-card summary,
+.tool-card summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  user-select: none;
+}
+
+.thinking-card > div,
+.tool-card pre {
+  margin: 0;
+  border-top: 1px solid #232a33;
+  padding: 12px;
+}
+
+.tool-card summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-family: "Cascadia Code", Consolas, monospace;
+}
+
+.tool-card.completed {
+  border-color: #293a31;
+}
+
+.tool-card.failed {
+  border-color: #503236;
+}
+
+.tool-card pre {
+  max-height: 280px;
+  overflow: auto;
+  color: #aab4c1;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 11px/1.5 "Cascadia Code", Consolas, monospace;
+}
+
+.agent-error {
+  width: min(880px, 100%);
+  margin: 16px auto 0;
+  border: 1px solid #583439;
+  border-radius: 9px;
+  background: #231518;
+  padding: 11px 13px;
+  color: #dfa7aa;
+  font-size: 12px;
+}
+
+.agent-start-button {
+  border: 1px solid #3d5274;
+  border-radius: 7px;
+  background: #21304a;
+  padding: 9px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.agent-start-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.stop-button {
+  border-color: #673c42 !important;
+  background: #321b20 !important;
+  color: #e0a7ad;
+}
+
+.composer textarea:not(:disabled) {
+  border-color: #34445c;
+}

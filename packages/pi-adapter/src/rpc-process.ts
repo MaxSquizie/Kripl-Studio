@@ -9,7 +9,68 @@ interface PendingRequest {
   reject(error: Error): void;
 }
 
+export interface PiRpcStartOptions {
+  agentDir: string;
+  sessionDir?: string;
+}
+
 const rpcEntryPath = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent/rpc-entry"));
+
+const REMOTE_PROVIDER_ENV_KEYS = [
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_OAUTH_TOKEN",
+  "OPENAI_API_KEY",
+  "GEMINI_API_KEY",
+  "GROQ_API_KEY",
+  "CEREBRAS_API_KEY",
+  "XAI_API_KEY",
+  "OPENROUTER_API_KEY",
+  "ZAI_API_KEY",
+  "ZAI_CODING_CN_API_KEY",
+  "MISTRAL_API_KEY",
+  "MINIMAX_API_KEY",
+  "MINIMAX_CN_API_KEY",
+  "AI_GATEWAY_API_KEY",
+  "OPENCODE_API_KEY",
+  "COPILOT_GITHUB_TOKEN",
+  "GH_TOKEN",
+  "GITHUB_TOKEN",
+  "HF_TOKEN",
+  "GOOGLE_APPLICATION_CREDENTIALS",
+  "GOOGLE_CLOUD_PROJECT",
+  "GCLOUD_PROJECT",
+  "GOOGLE_CLOUD_LOCATION",
+  "AWS_PROFILE",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
+  "AWS_BEARER_TOKEN_BEDROCK",
+  "AZURE_OPENAI_API_KEY",
+  "AZURE_OPENAI_BASE_URL",
+  "AZURE_OPENAI_RESOURCE_NAME"
+] as const;
+
+function createOfflineEnvironment(options: PiRpcStartOptions): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = { ...process.env };
+
+  for (const key of REMOTE_PROVIDER_ENV_KEYS) {
+    delete environment[key];
+  }
+
+  environment.ELECTRON_RUN_AS_NODE = "1";
+  environment.PI_OFFLINE = "1";
+  environment.PI_TELEMETRY = "0";
+  environment.PI_SKIP_VERSION_CHECK = "1";
+  environment.PI_CODING_AGENT_DIR = options.agentDir;
+
+  if (options.sessionDir) {
+    environment.PI_CODING_AGENT_SESSION_DIR = options.sessionDir;
+  } else {
+    delete environment.PI_CODING_AGENT_SESSION_DIR;
+  }
+
+  return environment;
+}
 
 export class PiRpcProcess {
   private child?: ChildProcessWithoutNullStreams;
@@ -22,20 +83,17 @@ export class PiRpcProcess {
     return Boolean(this.child && this.child.exitCode === null && !this.child.killed);
   }
 
-  start(cwd: string): void {
+  start(cwd: string, options: PiRpcStartOptions): void {
     if (this.running) {
       throw new Error("Pi RPC process is already running.");
     }
 
+    this.stdoutBuffer = "";
+    this.stderrBuffer = "";
+
     this.child = spawn(process.execPath, [rpcEntryPath], {
       cwd,
-      env: {
-        ...process.env,
-        ELECTRON_RUN_AS_NODE: "1",
-        PI_OFFLINE: "1",
-        PI_TELEMETRY: "0",
-        PI_SKIP_VERSION_CHECK: "1"
-      },
+      env: createOfflineEnvironment(options),
       stdio: ["pipe", "pipe", "pipe"]
     });
 

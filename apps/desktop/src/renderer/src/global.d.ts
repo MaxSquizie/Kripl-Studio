@@ -1,4 +1,11 @@
+import type { AgentEvent } from "@kripl/core";
+
 export {};
+
+interface ActionResult {
+  ok: boolean;
+  error?: string;
+}
 
 declare global {
   interface Window {
@@ -23,6 +30,15 @@ declare global {
         }>;
         error?: string;
       }>;
+      startAgent(request: {
+        workspacePath: string;
+        endpoint: string;
+        modelId: string;
+      }): Promise<ActionResult>;
+      sendAgentMessage(message: string): Promise<ActionResult>;
+      abortAgent(): Promise<ActionResult>;
+      stopAgent(): Promise<ActionResult>;
+      onAgentEvent(listener: (event: AgentEvent) => void): () => void;
     };
   }
 }

@@ -23,7 +23,8 @@ const api = {
       name: string;
       version: string;
       platform: string;
-      offlineFirst: boolean;
+      networkMode: "online" | "restricted" | "offline";
+      modelRouting: "local-only" | "allow-remote";
     }>,
 
   pickWorkspace: () => ipcRenderer.invoke(IPC.pickWorkspace) as Promise<string | null>,

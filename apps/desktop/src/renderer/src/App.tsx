@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentStatus } from "@kripl/core";
+import type { AgentEvent, AgentInteractionRequest, AgentInteractionResponse, AgentStatus } from "@kripl/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 interface AppInfo {
@@ -72,6 +72,7 @@ export function App() {
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
   const [tools, setTools] = useState<ToolActivity[]>([]);
   const [thinking, setThinking] = useState("");
+  const [interaction, setInteraction] = useState<AgentInteractionRequest | null>(null);
   const assistantMessageId = useRef<string | null>(null);
 
   useEffect(() => {
@@ -137,6 +138,18 @@ export function App() {
         return;
       }
 
+      if (event.type === "agent.interaction") {
+        setInteraction(event.request);
+        return;
+      }
+
+      if (event.type === "agent.notification") {
+        if (event.level === "error" || event.level === "warning") {
+          setAgentError(event.message);
+        }
+        return;
+      }
+
       if (event.type === "agent.tool") {
         setTools((current) => {
           const existing = current.findIndex((tool) => tool.callId === event.callId);
@@ -190,6 +203,7 @@ export function App() {
     setTools([]);
     setThinking("");
     setAgentError("");
+    setInteraction(null);
   }
 
   async function probeModels() {
@@ -257,6 +271,16 @@ export function App() {
       setAgentStatus("error");
       setAgentError(result.error ?? "Prompt was rejected.");
     }
+  }
+
+
+  async function respondToInteraction(response: AgentInteractionResponse) {
+    const result = await window.kripl.respondToAgentInteraction(response);
+    if (!result.ok) {
+      setAgentError(result.error ?? "Failed to answer agent permission request.");
+      return;
+    }
+    setInteraction(null);
   }
 
   async function abortAgent() {
@@ -510,6 +534,75 @@ export function App() {
           </div>
         </aside>
       </div>
+
+      {interaction && (
+        <div className="interaction-backdrop" role="presentation">
+          <section className="interaction-dialog" role="dialog" aria-modal="true">
+            <span className="eyebrow">Agent permission</span>
+            <h3>{interaction.title}</h3>
+            {interaction.message && <pre>{interaction.message}</pre>}
+
+            {interaction.kind === "confirm" && (
+              <div className="interaction-actions">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => void respondToInteraction({ id: interaction.id, confirmed: false })}
+                >
+                  Block
+                </button>
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={() => void respondToInteraction({ id: interaction.id, confirmed: true })}
+                >
+                  Allow
+                </button>
+              </div>
+            )}
+
+            {interaction.kind === "select" && (
+              <div className="interaction-options">
+                {(interaction.options ?? []).map((option) => (
+                  <button
+                    key={option}
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => void respondToInteraction({ id: interaction.id, value: option })}
+                  >
+                    {option}
+                  </button>
+                ))}
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => void respondToInteraction({ id: interaction.id, cancelled: true })}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
+            {(interaction.kind === "input" || interaction.kind === "editor") && (
+              <>
+                <p className="interaction-note">
+                  This interaction type is not exposed by Kripl yet. It is cancelled fail-closed.
+                </p>
+                <div className="interaction-actions">
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => void respondToInteraction({ id: interaction.id, cancelled: true })}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            )}
+          </section>
+        </div>
+      )}
+
     </div>
   );
 }

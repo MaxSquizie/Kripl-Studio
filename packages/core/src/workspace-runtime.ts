@@ -54,7 +54,11 @@ export interface WorkspaceRuntime {
   descriptor(): WorkspaceDescriptor | null;
   list(path?: string): Promise<WorkspaceEntry[]>;
   readFile(path: string): Promise<WorkspaceFilePreview>;
+  writeFile(path: string, content: string): Promise<WorkspaceFilePreview>;
   getChanges(): Promise<WorkspaceChange[]>;
   getDiff(path: string): Promise<WorkspaceDiff>;
+  stage(path: string): Promise<void>;
+  unstage(path: string): Promise<void>;
+  revert(path: string): Promise<void>;
   dispose(): Promise<void>;
 }

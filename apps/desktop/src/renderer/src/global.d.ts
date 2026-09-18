@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInteractionResponse, BrowserState, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, BrowserState, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
 
 export {};
 
@@ -46,6 +46,13 @@ declare global {
       getBrowserState(): Promise<BrowserState>;
       setBrowserVisible(visible: boolean): Promise<BrowserState>;
       onBrowserState(listener: (state: BrowserState) => void): () => void;
+      getTerminalState(): Promise<TerminalSessionInfo | null>;
+      startTerminal(size?: { cols?: number; rows?: number }): Promise<TerminalSessionInfo>;
+      writeTerminal(data: string): Promise<void>;
+      resizeTerminal(cols: number, rows: number): Promise<void>;
+      killTerminal(): Promise<void>;
+      setTerminalPanelVisible(visible: boolean): Promise<void>;
+      onTerminalEvent(listener: (event: TerminalEvent) => void): () => void;
       onAgentEvent(listener: (event: AgentEvent) => void): () => void;
     };
   }

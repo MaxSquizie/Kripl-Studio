@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceGitStatus } from "@kripl/core";
 import { contextBridge, ipcRenderer } from "electron";
 
 const IPC = {
@@ -20,6 +20,8 @@ const IPC = {
   workspaceStage: "kripl:workspace-stage",
   workspaceUnstage: "kripl:workspace-unstage",
   workspaceRevert: "kripl:workspace-revert",
+  workspaceGitStatus: "kripl:workspace-git-status",
+  workspaceCommit: "kripl:workspace-commit",
   probeLocalModels: "kripl:probe-local-models",
   agentSessions: "kripl:agent-sessions",
   agentStart: "kripl:agent-start",
@@ -106,6 +108,12 @@ const api = {
 
   revertWorkspaceChange: (path: string) =>
     ipcRenderer.invoke(IPC.workspaceRevert, path) as Promise<void>,
+
+  getWorkspaceGitStatus: () =>
+    ipcRenderer.invoke(IPC.workspaceGitStatus) as Promise<WorkspaceGitStatus | null>,
+
+  commitWorkspaceChanges: (message: string) =>
+    ipcRenderer.invoke(IPC.workspaceCommit, message) as Promise<WorkspaceCommitResult>,
 
   probeLocalModels: (endpoint: string) =>
     ipcRenderer.invoke(IPC.probeLocalModels, endpoint) as Promise<{

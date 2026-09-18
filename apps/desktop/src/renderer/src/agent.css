@@ -212,3 +212,18 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+
+.browser-toggle:disabled {
+  border-color: #29352f;
+  background: #111714;
+  color: #5f706a;
+  cursor: default;
+  opacity: 0.72;
+}
+
+.browser-toggle.active {
+  border-color: #4f806f;
+  background: #173027;
+  color: #bdd8cf;
+}

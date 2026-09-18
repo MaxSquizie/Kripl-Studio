@@ -1,9 +1,10 @@
-import type { AgentEvent, AgentInteractionRequest, AgentInteractionResponse, AgentStatus, BrowserState, DesktopUiState, RecentProject, WorkspaceChange, WorkspaceDescriptor, WorkspaceEntry } from "@kripl/core";
+import type { AgentEvent, AgentInteractionRequest, AgentInteractionResponse, AgentStatus, BrowserState, DesktopRuntimeSettings, DesktopUiState, RecentProject, WorkspaceChange, WorkspaceDescriptor, WorkspaceEntry } from "@kripl/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import { WorkspaceContent, activeWorkspacePath, type WorkspaceView } from "./WorkspaceContent";
 import { TerminalPanel } from "./TerminalPanel";
 import { RecentProjectsCard } from "./RecentProjectsCard";
+import { RuntimeSettingsCard } from "./RuntimeSettingsCard";
 
 interface AppInfo {
   name: string;
@@ -80,6 +81,7 @@ export function App() {
   const [workspaceChanges, setWorkspaceChanges] = useState<WorkspaceChange[]>([]);
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>({ type: "agent" });
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
+  const [runtimeSettings, setRuntimeSettings] = useState<DesktopRuntimeSettings | null>(null);
   const [endpoint, setEndpoint] = useState(DEFAULT_LOCAL_ENDPOINT);
   const [probe, setProbe] = useState<ProbeState>({ status: "idle", models: [] });
   const [selectedModel, setSelectedModel] = useState("");
@@ -109,6 +111,7 @@ export function App() {
       .then(async (bootstrap) => {
         if (disposed) return;
         setRecentProjects(bootstrap.recentProjects);
+        setRuntimeSettings(bootstrap.runtime);
         if (bootstrap.workspace) {
           await hydrateWorkspace(bootstrap.workspace, bootstrap.ui);
         }
@@ -247,8 +250,13 @@ export function App() {
 
 
   async function toggleBrowser() {
-    const next = await window.kripl.setBrowserVisible(!browserState.visible);
-    setBrowserState(next);
+    if (runtimeSettings?.networkMode === "offline") return;
+    try {
+      const next = await window.kripl.setBrowserVisible(!browserState.visible);
+      setBrowserState(next);
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : String(error));
+    }
   }
 
   function toggleTerminal() {
@@ -494,6 +502,33 @@ export function App() {
     });
   }
 
+  async function applyRuntimeSettings(next: DesktopRuntimeSettings) {
+    const saved = await window.kripl.saveRuntimeSettings(next);
+    setRuntimeSettings(saved);
+    setAppInfo((current) =>
+      current
+        ? {
+            ...current,
+            networkMode: saved.networkMode,
+            modelRouting: saved.modelRouting
+          }
+        : current
+    );
+    setBinding(null);
+    setAgentStatus("stopped");
+    setInteraction(null);
+    assistantMessageId.current = null;
+
+    if (saved.networkMode === "offline") {
+      setBrowserState((current) => ({
+        ...current,
+        visible: false,
+        loading: false,
+        url: current.url === "about:blank" ? "" : current.url
+      }));
+    }
+  }
+
   async function startAgent() {
     if (!workspace || !modelReady || !selectedModel) return;
 
@@ -572,9 +607,20 @@ export function App() {
           className={`browser-toggle ${browserState.visible ? "active" : ""}`}
           type="button"
           onClick={() => void toggleBrowser()}
-          title={browserState.url || "Show interactive browser"}
+          title={
+            runtimeSettings?.networkMode === "offline"
+              ? "Browser disabled in Offline mode"
+              : browserState.url || "Show interactive browser"
+          }
+          disabled={runtimeSettings?.networkMode === "offline"}
         >
-          {browserState.loading ? "Browser · loading" : browserState.visible ? "Browser · open" : "Browser"}
+          {runtimeSettings?.networkMode === "offline"
+            ? "Browser · offline"
+            : browserState.loading
+              ? "Browser · loading"
+              : browserState.visible
+                ? "Browser · open"
+                : "Browser"}
         </button>
         <button
           className={"browser-toggle" + (terminalVisible ? " active" : "")}
@@ -586,7 +632,7 @@ export function App() {
         </button>
         <div className="runtime-pill">
           <span className="status-dot" />
-          local model · network online
+          local model · network {runtimeSettings?.networkMode ?? "online"}
         </div>
       </header>
 
@@ -736,7 +782,7 @@ export function App() {
             </div>
             <div className="status-line">
               <span>Network</span>
-              <strong>{appInfo?.networkMode ?? "online"}</strong>
+              <strong>{runtimeSettings?.networkMode ?? appInfo?.networkMode ?? "online"}</strong>
             </div>
             <div className="status-line">
               <span>Browser</span>
@@ -806,33 +852,12 @@ export function App() {
             </button>
           </div>
 
-          <div className="status-card">
-            <span className="eyebrow">Permissions</span>
-            <div className="status-line">
-              <span>Workspace read/write</span>
-              <strong>allow</strong>
-            </div>
-            <div className="status-line">
-              <span>Outside workspace</span>
-              <strong className="muted">ask</strong>
-            </div>
-            <div className="status-line">
-              <span>Sensitive files</span>
-              <strong className="muted">ask</strong>
-            </div>
-            <div className="status-line">
-              <span>Shell commands</span>
-              <strong className="muted">ask</strong>
-            </div>
-            <div className="status-line">
-              <span>Network read/search</span>
-              <strong>allow</strong>
-            </div>
-            <div className="status-line">
-              <span>Browser click/type</span>
-              <strong className="muted">ask</strong>
-            </div>
-          </div>
+          {runtimeSettings && (
+            <RuntimeSettingsCard
+              settings={runtimeSettings}
+              onApply={applyRuntimeSettings}
+            />
+          )}
 
           {browserState.url && (
             <div className="status-card">

@@ -1,10 +1,11 @@
-import type { AgentEvent, AgentInteractionRequest, AgentInteractionResponse, AgentStatus, BrowserState, DesktopRuntimeSettings, DesktopUiState, RecentProject, WorkspaceChange, WorkspaceDescriptor, WorkspaceEntry } from "@kripl/core";
+import type { AgentEvent, AgentInteractionRequest, AgentInteractionResponse, AgentStatus, BrowserState, ContextInspectorSnapshot, DesktopRuntimeSettings, DesktopUiState, RecentProject, WorkspaceChange, WorkspaceDescriptor, WorkspaceEntry } from "@kripl/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import { WorkspaceContent, activeWorkspacePath, type WorkspaceView } from "./WorkspaceContent";
 import { TerminalPanel } from "./TerminalPanel";
 import { RecentProjectsCard } from "./RecentProjectsCard";
 import { RuntimeSettingsCard } from "./RuntimeSettingsCard";
+import { ContextInspectorCard } from "./ContextInspectorCard";
 
 interface AppInfo {
   name: string;
@@ -82,6 +83,7 @@ export function App() {
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>({ type: "agent" });
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [runtimeSettings, setRuntimeSettings] = useState<DesktopRuntimeSettings | null>(null);
+  const [contextSnapshot, setContextSnapshot] = useState<ContextInspectorSnapshot | null>(null);
   const [endpoint, setEndpoint] = useState(DEFAULT_LOCAL_ENDPOINT);
   const [probe, setProbe] = useState<ProbeState>({ status: "idle", models: [] });
   const [selectedModel, setSelectedModel] = useState("");
@@ -106,6 +108,9 @@ export function App() {
     void window.kripl.getBrowserState().then((state) => {
       if (!disposed) setBrowserState(state);
     });
+    void window.kripl.getContextSnapshot().then((snapshot) => {
+      if (!disposed) setContextSnapshot(snapshot);
+    });
 
     void window.kripl.getDesktopBootstrap()
       .then(async (bootstrap) => {
@@ -125,10 +130,14 @@ export function App() {
     const unsubscribeBrowser = window.kripl.onBrowserState((state) => {
       if (!disposed) setBrowserState(state);
     });
+    const unsubscribeContext = window.kripl.onContextSnapshot((snapshot) => {
+      if (!disposed) setContextSnapshot(snapshot);
+    });
 
     return () => {
       disposed = true;
       unsubscribeBrowser();
+      unsubscribeContext();
     };
   }, []);
 
@@ -484,6 +493,10 @@ export function App() {
     }
   }
 
+  async function retrieveMemory(query: string) {
+    await window.kripl.retrieveMemory(query);
+  }
+
   async function probeModels() {
     setProbe((current) => ({ status: "checking", models: current.models }));
     const result = await window.kripl.probeLocalModels(endpoint);
@@ -778,7 +791,9 @@ export function App() {
             </div>
             <div className="status-line">
               <span>Memory</span>
-              <strong className="muted">disabled</strong>
+              <strong className={contextSnapshot?.memoryHealth.status === "ready" ? "" : "muted"}>
+                {contextSnapshot?.memoryHealth.status ?? "loading"}
+              </strong>
             </div>
             <div className="status-line">
               <span>Network</span>
@@ -795,6 +810,11 @@ export function App() {
               <strong>off</strong>
             </div>
           </div>
+
+          <ContextInspectorCard
+            snapshot={contextSnapshot}
+            onRetrieve={retrieveMemory}
+          />
 
           <div className="status-card">
             <span className="eyebrow">Local model server</span>
@@ -884,7 +904,7 @@ export function App() {
           <div className="status-card">
             <span className="eyebrow">Next</span>
             <ol>
-              <li>Add permission/network profile settings.</li>
+              <li>Connect a real MemoryRuntime / AG Memory adapter.</li>
             </ol>
           </div>
         </aside>

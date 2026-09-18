@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInteractionResponse, BrowserState, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
 
 export {};
 
@@ -23,6 +23,9 @@ declare global {
       forgetRecentProject(path: string): Promise<RecentProject[]>;
       saveDesktopUi(ui: DesktopUiState): Promise<void>;
       saveRuntimeSettings(runtime: DesktopRuntimeSettings): Promise<DesktopRuntimeSettings>;
+      getContextSnapshot(): Promise<ContextInspectorSnapshot>;
+      retrieveMemory(query: string): Promise<MemoryItem[]>;
+      onContextSnapshot(listener: (snapshot: ContextInspectorSnapshot) => void): () => void;
       listWorkspace(path?: string): Promise<WorkspaceEntry[]>;
       readWorkspaceFile(path: string): Promise<WorkspaceFilePreview>;
       getWorkspaceChanges(): Promise<WorkspaceChange[]>;

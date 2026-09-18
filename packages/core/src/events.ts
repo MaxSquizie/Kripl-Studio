@@ -79,7 +79,61 @@ export type AgentEvent =
       payload: unknown;
     };
 
-export interface RuntimeEventEnvelope<TEvent = AgentEvent> {
+export type RuntimeEvent =
+  | AgentEvent
+  | {
+      type: "user.message";
+      text: string;
+      workspacePath?: string;
+    }
+  | {
+      type: "workspace.opened";
+      path: string;
+      name: string;
+      gitRepository: boolean;
+    }
+  | {
+      type: "workspace.file.opened";
+      path: string;
+      sizeBytes: number;
+      binary: boolean;
+    }
+  | {
+      type: "workspace.diff.opened";
+      path: string;
+    }
+  | {
+      type: "browser.state";
+      visible: boolean;
+      loading: boolean;
+      url: string;
+      title: string;
+    }
+  | {
+      type: "terminal.session";
+      status: "idle" | "starting" | "running" | "exited";
+      cwd?: string;
+      shell?: string;
+      exitCode?: number;
+    }
+  | {
+      type: "memory.query";
+      text: string;
+      workspacePath?: string;
+    }
+  | {
+      type: "memory.retrieved";
+      query: string;
+      itemIds: string[];
+    }
+  | {
+      type: "memory.status";
+      runtimeId: string;
+      status: "disabled" | "ready" | "degraded" | "error";
+      message?: string;
+    };
+
+export interface RuntimeEventEnvelope<TEvent extends RuntimeEvent = RuntimeEvent> {
   id: string;
   timestamp: number;
   event: TEvent;

@@ -1,5 +1,6 @@
-import type { AgentEvent, AgentInteractionResponse, AgentStatus, BrowserState, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, AgentStatus, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
 import { JsonDesktopStateStore } from "@kripl/app-state";
+import { InspectableContextRuntime } from "@kripl/context-runtime";
 import { LocalOpenAIProvider } from "@kripl/local-openai-provider";
 import { effectivePermissionPolicy, parsePermissionPolicy } from "@kripl/permissions";
 import { PiAgentRuntime } from "@kripl/pi-adapter";
@@ -22,6 +23,9 @@ const IPC = {
   forgetRecentProject: "kripl:forget-recent-project",
   saveDesktopUi: "kripl:save-desktop-ui",
   saveRuntimeSettings: "kripl:save-runtime-settings",
+  contextGetSnapshot: "kripl:context-get-snapshot",
+  contextRetrieveMemory: "kripl:context-retrieve-memory",
+  contextSnapshot: "kripl:context-snapshot",
   workspaceList: "kripl:workspace-list",
   workspaceReadFile: "kripl:workspace-read-file",
   workspaceChanges: "kripl:workspace-changes",
@@ -62,6 +66,9 @@ let browserRuntime: BrowserRuntime | undefined;
 let toolBridgeServer: ToolBridgeServer | undefined;
 let browserUnsubscribe: (() => void) | undefined;
 let terminalUnsubscribe: (() => void) | undefined;
+let contextUnsubscribe: (() => void) | undefined;
+let lastBrowserContextKey = "";
+const contextRuntime = new InspectableContextRuntime({ maxEvents: 120 });
 const workspaceRuntime = new LocalWorkspaceRuntime();
 const terminalRuntime = new PtyTerminalRuntime();
 let desktopStateStore: JsonDesktopStateStore | undefined;
@@ -83,6 +90,37 @@ function actionError(error: unknown): ActionResult {
     ok: false,
     error: error instanceof Error ? error.message : String(error)
   };
+}
+
+function recordWorkspaceOpened(workspace: WorkspaceDescriptor): void {
+  void contextRuntime.record({
+    type: "workspace.opened",
+    path: workspace.path,
+    name: workspace.name,
+    gitRepository: workspace.gitRepository
+  });
+}
+
+function recordBrowserState(state: BrowserState): void {
+  const key = [state.visible, state.url, state.title].join("|");
+  if (key === lastBrowserContextKey) return;
+  lastBrowserContextKey = key;
+  void contextRuntime.record({
+    type: "browser.state",
+    visible: state.visible,
+    loading: state.loading,
+    url: state.url,
+    title: state.title
+  });
+}
+
+function initializeContextForwarding(window: BrowserWindow): void {
+  contextUnsubscribe?.();
+  contextUnsubscribe = contextRuntime.subscribe((snapshot) => {
+    if (!window.webContents.isDestroyed()) {
+      window.webContents.send(IPC.contextSnapshot, snapshot);
+    }
+  });
 }
 
 function requireDesktopStateStore(): JsonDesktopStateStore {
@@ -154,6 +192,7 @@ async function openWorkspacePath(
     });
   }
 
+  recordWorkspaceOpened(descriptor);
   return descriptor;
 }
 
@@ -163,7 +202,8 @@ async function restoreLastWorkspace(): Promise<void> {
   if (!state.lastWorkspacePath) return;
 
   try {
-    await workspaceRuntime.open(state.lastWorkspacePath);
+    const descriptor = await workspaceRuntime.open(state.lastWorkspacePath);
+    recordWorkspaceOpened(descriptor);
   } catch {
     await store.clearLastWorkspace();
   }
@@ -213,6 +253,8 @@ async function disposeActiveAgent(): Promise<void> {
 }
 
 function forwardAgentEvent(target: Electron.WebContents, event: AgentEvent): void {
+  void contextRuntime.record(event);
+
   if (event.type === "agent.status") {
     activeAgentStatus = event.status;
   }
@@ -224,6 +266,17 @@ function forwardAgentEvent(target: Electron.WebContents, event: AgentEvent): voi
 function initializeTerminalForwarding(window: BrowserWindow): void {
   terminalUnsubscribe?.();
   terminalUnsubscribe = terminalRuntime.subscribe((event: TerminalEvent) => {
+    if (event.type === "terminal.exit") {
+      const current = terminalRuntime.state();
+      void contextRuntime.record({
+        type: "terminal.session",
+        status: "exited",
+        ...(current?.cwd ? { cwd: current.cwd } : {}),
+        ...(current?.shell ? { shell: current.shell } : {}),
+        exitCode: event.exitCode
+      });
+    }
+
     if (!window.webContents.isDestroyed()) {
       window.webContents.send(IPC.terminalEvent, event);
     }
@@ -233,8 +286,6 @@ function initializeTerminalForwarding(window: BrowserWindow): void {
 async function initializeBrowserRuntime(window: BrowserWindow): Promise<void> {
   browserUnsubscribe?.();
   browserUnsubscribe = undefined;
-  terminalUnsubscribe?.();
-  terminalUnsubscribe = undefined;
 
   browserRuntime?.dispose();
   browserRuntime = undefined;
@@ -252,6 +303,7 @@ async function initializeBrowserRuntime(window: BrowserWindow): Promise<void> {
   browserRuntime = runtime;
   toolBridgeServer = bridge;
   browserUnsubscribe = runtime.subscribe((state) => {
+    recordBrowserState(state);
     if (!window.webContents.isDestroyed()) {
       window.webContents.send(IPC.browserState, state);
     }
@@ -360,6 +412,25 @@ function registerIpc(): void {
     await requireDesktopStateStore().setUiState(ui);
   });
 
+  ipcMain.handle(IPC.contextGetSnapshot, (): ContextInspectorSnapshot => {
+    return contextRuntime.snapshot();
+  });
+
+  ipcMain.handle(
+    IPC.contextRetrieveMemory,
+    async (_event, query: unknown): Promise<MemoryItem[]> => {
+      if (typeof query !== "string" || query.length > 100_000) {
+        throw new Error("Invalid memory query.");
+      }
+      const workspace = workspaceRuntime.descriptor();
+      return contextRuntime.retrieveMemory(
+        query,
+        workspace?.path,
+        8
+      );
+    }
+  );
+
   ipcMain.handle(
     IPC.saveRuntimeSettings,
     async (_event, value: unknown): Promise<DesktopRuntimeSettings> => {
@@ -389,7 +460,14 @@ function registerIpc(): void {
       if (typeof path !== "string" || !path || path.length > 32_768) {
         throw new Error("Invalid workspace file path.");
       }
-      return workspaceRuntime.readFile(path);
+      const preview = await workspaceRuntime.readFile(path);
+      void contextRuntime.record({
+        type: "workspace.file.opened",
+        path: preview.path,
+        sizeBytes: preview.size,
+        binary: preview.binary
+      });
+      return preview;
     }
   );
 
@@ -401,7 +479,12 @@ function registerIpc(): void {
     if (typeof path !== "string" || !path || path.length > 32_768) {
       throw new Error("Invalid workspace diff path.");
     }
-    return workspaceRuntime.getDiff(path);
+    const diff = await workspaceRuntime.getDiff(path);
+    void contextRuntime.record({
+      type: "workspace.diff.opened",
+      path: diff.path
+    });
+    return diff;
   });
 
   ipcMain.handle(IPC.probeLocalModels, async (_event, endpoint: unknown) => {
@@ -487,6 +570,12 @@ function registerIpc(): void {
     }
 
     try {
+      const workspace = workspaceRuntime.descriptor();
+      await contextRuntime.record({
+        type: "user.message",
+        text: message,
+        ...(workspace?.path ? { workspacePath: workspace.path } : {})
+      });
       await activeAgent.send({ text: message });
       return { ok: true };
     } catch (error) {
@@ -569,11 +658,18 @@ function registerIpc(): void {
         }
       }
 
-      return terminalRuntime.start({
+      const session = await terminalRuntime.start({
         cwd: workspace.path,
         ...(cols === undefined ? {} : { cols }),
         ...(rows === undefined ? {} : { rows })
       });
+      void contextRuntime.record({
+        type: "terminal.session",
+        status: session.status,
+        cwd: session.cwd,
+        shell: session.shell
+      });
+      return session;
     }
   );
 
@@ -635,18 +731,21 @@ void app.whenReady().then(async () => {
   desktopStateStore = new JsonDesktopStateStore(
     join(app.getPath("userData"), "desktop-state.json")
   );
+  await contextRuntime.initialize();
   await restoreLastWorkspace();
 
   registerIpc();
   const window = createWindow();
   await initializeBrowserRuntime(window);
   initializeTerminalForwarding(window);
+  initializeContextForwarding(window);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       const nextWindow = createWindow();
       void initializeBrowserRuntime(nextWindow);
       initializeTerminalForwarding(nextWindow);
+      initializeContextForwarding(nextWindow);
     }
   });
 });
@@ -654,10 +753,15 @@ void app.whenReady().then(async () => {
 app.on("before-quit", () => {
   browserUnsubscribe?.();
   browserUnsubscribe = undefined;
+  terminalUnsubscribe?.();
+  terminalUnsubscribe = undefined;
+  contextUnsubscribe?.();
+  contextUnsubscribe = undefined;
   browserRuntime?.dispose();
   browserRuntime = undefined;
   void toolBridgeServer?.dispose();
   toolBridgeServer = undefined;
+  void contextRuntime.dispose();
   void terminalRuntime.dispose();
   void workspaceRuntime.dispose();
   void disposeActiveAgent();

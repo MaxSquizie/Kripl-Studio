@@ -23,6 +23,7 @@ function defaultState(): DesktopPersistenceState {
   return {
     version: 1,
     recentProjects: [],
+    lastSessionByWorkspace: {},
     ui: {
       workspaceView: { type: "agent" },
       expandedDirectories: []
@@ -108,6 +109,22 @@ function normalizeUi(value: unknown): DesktopUiState {
   };
 }
 
+function normalizeLastSessionByWorkspace(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+
+  const result: Record<string, string> = {};
+  const entries = Object.entries(value as Record<string, unknown>).slice(0, 128);
+
+  for (const [workspacePath, sessionPathValue] of entries) {
+    const workspace = normalizePath(workspacePath);
+    const session = normalizePath(sessionPathValue);
+    if (!workspace || !session) continue;
+    result[workspace] = session;
+  }
+
+  return result;
+}
+
 function normalizeRuntime(value: unknown): DesktopRuntimeSettings {
   const fallback = defaultState().runtime;
   if (!value || typeof value !== "object" || Array.isArray(value)) return fallback;
@@ -146,11 +163,13 @@ export function normalizeDesktopPersistenceState(value: unknown): DesktopPersist
   const lastWorkspacePath = normalizePath(record.lastWorkspacePath);
   const ui = normalizeUi(record.ui);
   const runtime = normalizeRuntime(record.runtime);
+  const lastSessionByWorkspace = normalizeLastSessionByWorkspace(record.lastSessionByWorkspace);
 
   return {
     version: 1,
     recentProjects,
     ...(lastWorkspacePath ? { lastWorkspacePath } : {}),
+    lastSessionByWorkspace,
     ui,
     runtime
   };
@@ -182,6 +201,7 @@ export class JsonDesktopStateStore {
       version: 1,
       recentProjects: this.state.recentProjects.map((item) => ({ ...item })),
       ...(this.state.lastWorkspacePath ? { lastWorkspacePath: this.state.lastWorkspacePath } : {}),
+      lastSessionByWorkspace: { ...this.state.lastSessionByWorkspace },
       ui: {
         workspaceView: { ...this.state.ui.workspaceView },
         expandedDirectories: [...this.state.ui.expandedDirectories]
@@ -241,6 +261,31 @@ export class JsonDesktopStateStore {
     await this.ensureLoaded();
     this.state.runtime = normalizeRuntime(runtime);
     await this.persist();
+  }
+
+  async rememberSession(workspacePath: string, sessionPath: string): Promise<void> {
+    await this.ensureLoaded();
+    const workspace = resolve(workspacePath);
+    const session = resolve(sessionPath);
+    this.state.lastSessionByWorkspace = {
+      ...this.state.lastSessionByWorkspace,
+      [workspace]: session
+    };
+    await this.persist();
+  }
+
+  async forgetSession(workspacePath: string): Promise<void> {
+    await this.ensureLoaded();
+    const workspace = resolve(workspacePath);
+    if (!(workspace in this.state.lastSessionByWorkspace)) return;
+    const next = { ...this.state.lastSessionByWorkspace };
+    delete next[workspace];
+    this.state.lastSessionByWorkspace = next;
+    await this.persist();
+  }
+
+  lastSessionFor(workspacePath: string): string | undefined {
+    return this.state.lastSessionByWorkspace[resolve(workspacePath)];
   }
 
   hasRecentProject(path: string): boolean {

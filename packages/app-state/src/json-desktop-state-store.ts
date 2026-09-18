@@ -237,6 +237,11 @@ export class JsonDesktopStateStore {
     this.state.recentProjects = this.state.recentProjects.filter(
       (item) => item.path !== canonicalPath
     );
+    if (canonicalPath in this.state.lastSessionByWorkspace) {
+      const nextSessions = { ...this.state.lastSessionByWorkspace };
+      delete nextSessions[canonicalPath];
+      this.state.lastSessionByWorkspace = nextSessions;
+    }
     if (this.state.lastWorkspacePath === canonicalPath) {
       delete this.state.lastWorkspacePath;
       this.state.ui = defaultState().ui;

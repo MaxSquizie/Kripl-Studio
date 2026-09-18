@@ -51,6 +51,7 @@ function payloadPreview(payload: unknown): string {
   if (payload === undefined) return "";
   try {
     const serialized = JSON.stringify(payload, null, 2);
+    if (typeof serialized !== "string") return String(payload);
     return serialized.length > 1800 ? `${serialized.slice(0, 1800)}\n…` : serialized;
   } catch {
     return String(payload);

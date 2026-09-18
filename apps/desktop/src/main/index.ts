@@ -464,7 +464,7 @@ function registerIpc(): void {
       void contextRuntime.record({
         type: "workspace.file.opened",
         path: preview.path,
-        sizeBytes: preview.sizeBytes,
+        sizeBytes: preview.size,
         binary: preview.binary
       });
       return preview;

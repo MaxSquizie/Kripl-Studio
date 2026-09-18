@@ -1,14 +1,14 @@
-import type { AgentEvent, AgentInteractionResponse, AgentStatus, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
 import { JsonDesktopStateStore } from "@kripl/app-state";
 import { InspectableContextRuntime } from "@kripl/context-runtime";
 import { LocalOpenAIProvider } from "@kripl/local-openai-provider";
 import { effectivePermissionPolicy, parsePermissionPolicy } from "@kripl/permissions";
-import { PiAgentRuntime } from "@kripl/pi-adapter";
+import { PiAgentRuntime, PiSessionCatalog } from "@kripl/pi-adapter";
 import { PtyTerminalRuntime } from "@kripl/terminal";
 import { LocalWorkspaceRuntime } from "@kripl/workspace";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { stat } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserRuntime } from "./browser-runtime.js";
 import { ToolBridgeServer } from "./tool-bridge.js";
@@ -31,7 +31,9 @@ const IPC = {
   workspaceChanges: "kripl:workspace-changes",
   workspaceDiff: "kripl:workspace-diff",
   probeLocalModels: "kripl:probe-local-models",
+  agentSessions: "kripl:agent-sessions",
   agentStart: "kripl:agent-start",
+  agentSessionSnapshot: "kripl:agent-session-snapshot",
   agentSend: "kripl:agent-send",
   agentAbort: "kripl:agent-abort",
   agentStop: "kripl:agent-stop",
@@ -52,6 +54,7 @@ const IPC = {
 interface AgentStartRequest {
   endpoint: string;
   modelId: string;
+  sessionPath?: string;
 }
 
 interface ActionResult {
@@ -126,6 +129,51 @@ function initializeContextForwarding(window: BrowserWindow): void {
 function requireDesktopStateStore(): JsonDesktopStateStore {
   if (!desktopStateStore) throw new Error("Desktop state store is not initialized.");
   return desktopStateStore;
+}
+
+function piSessionDir(): string {
+  return join(app.getPath("userData"), "pi-sessions");
+}
+
+function pathKey(path: string): string {
+  const normalized = resolve(path);
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+async function listWorkspaceSessions(workspacePath: string): Promise<AgentSessionSummary[]> {
+  return new PiSessionCatalog(piSessionDir()).list(workspacePath);
+}
+
+async function validatedSessionPath(
+  workspacePath: string,
+  requestedPath: string | undefined
+): Promise<string | undefined> {
+  if (!requestedPath) return undefined;
+  if (requestedPath.length > 32_768) throw new Error("Session path is too long.");
+
+  const requestedKey = pathKey(requestedPath);
+  const sessions = await listWorkspaceSessions(workspacePath);
+  const matched = sessions.find((session) => pathKey(session.path) === requestedKey);
+  if (!matched) {
+    throw new Error("Selected Pi session does not belong to the active workspace.");
+  }
+  return matched.path;
+}
+
+async function rememberActiveAgentSession(): Promise<void> {
+  const agent = activeAgent;
+  const workspace = workspaceRuntime.descriptor();
+  if (!agent || !workspace) return;
+
+  try {
+    const snapshot = await agent.getSessionSnapshot();
+    if (!snapshot.sessionFile) return;
+    const info = await stat(snapshot.sessionFile);
+    if (!info.isFile()) return;
+    await requireDesktopStateStore().rememberSession(workspace.path, snapshot.sessionFile);
+  } catch {
+    // Session persistence is best-effort and must not break agent execution.
+  }
 }
 
 function isDesktopUiState(value: unknown): value is DesktopUiState {
@@ -218,7 +266,11 @@ function isAgentStartRequest(value: unknown): value is AgentStartRequest {
     record.endpoint.length <= 2_048 &&
     typeof record.modelId === "string" &&
     record.modelId.length > 0 &&
-    record.modelId.length <= 512
+    record.modelId.length <= 512 &&
+    (record.sessionPath === undefined ||
+      (typeof record.sessionPath === "string" &&
+        record.sessionPath.length > 0 &&
+        record.sessionPath.length <= 32_768))
   );
 }
 
@@ -242,6 +294,9 @@ async function validateLocalModel(endpoint: string, modelId: string) {
 
 async function disposeActiveAgent(): Promise<void> {
   const agent = activeAgent;
+  if (agent) {
+    await rememberActiveAgentSession();
+  }
   activeAgent = undefined;
   activeAgentUnsubscribe?.();
   activeAgentUnsubscribe = undefined;
@@ -257,6 +312,9 @@ function forwardAgentEvent(target: Electron.WebContents, event: AgentEvent): voi
 
   if (event.type === "agent.status") {
     activeAgentStatus = event.status;
+    if (event.status === "ready") {
+      void rememberActiveAgentSession();
+    }
   }
 
   if (event.type === "agent.raw" || target.isDestroyed()) return;
@@ -351,9 +409,12 @@ function registerIpc(): void {
   ipcMain.handle(IPC.desktopBootstrap, (): DesktopBootstrapState => {
     const store = requireDesktopStateStore();
     const state = store.snapshot();
+    const workspace = workspaceRuntime.descriptor();
+    const lastSessionPath = workspace ? store.lastSessionFor(workspace.path) : undefined;
     return {
-      workspace: workspaceRuntime.descriptor(),
+      workspace,
       recentProjects: state.recentProjects,
+      ...(lastSessionPath ? { lastSessionPath } : {}),
       ui: state.ui,
       runtime: state.runtime
     };
@@ -487,6 +548,17 @@ function registerIpc(): void {
     return diff;
   });
 
+  ipcMain.handle(IPC.agentSessions, async (): Promise<AgentSessionSummary[]> => {
+    const workspace = workspaceRuntime.descriptor();
+    if (!workspace) return [];
+    return listWorkspaceSessions(workspace.path);
+  });
+
+  ipcMain.handle(IPC.agentSessionSnapshot, async (): Promise<AgentSessionSnapshot | null> => {
+    if (!activeAgent) return null;
+    return activeAgent.getSessionSnapshot();
+  });
+
   ipcMain.handle(IPC.probeLocalModels, async (_event, endpoint: unknown) => {
     if (typeof endpoint !== "string" || endpoint.length > 2048) {
       return { ok: false, endpoint: "", models: [], error: "Invalid local model endpoint." };
@@ -517,6 +589,7 @@ function registerIpc(): void {
         throw new Error("Open a workspace before starting the agent.");
       }
       const localModel = await validateLocalModel(request.endpoint, request.modelId);
+      const sessionPath = await validatedSessionPath(workspace.path, request.sessionPath);
 
       await disposeActiveAgent();
 
@@ -534,7 +607,7 @@ function registerIpc(): void {
       const userData = app.getPath("userData");
       const agent = new PiAgentRuntime({
         agentDir: join(userData, "pi-agent"),
-        sessionDir: join(userData, "pi-sessions"),
+        sessionDir: piSessionDir(),
         localModel: {
           baseUrl: localModel.endpoint,
           modelId: localModel.modelId
@@ -550,7 +623,11 @@ function registerIpc(): void {
         forwardAgentEvent(event.sender, agentEvent);
       });
 
-      await agent.start({ workspacePath: workspace.path });
+      await agent.start({
+        workspacePath: workspace.path,
+        ...(sessionPath ? { sessionPath } : {})
+      });
+      await rememberActiveAgentSession();
       return { ok: true };
     } catch (error) {
       await disposeActiveAgent();

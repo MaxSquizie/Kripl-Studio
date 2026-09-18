@@ -111,7 +111,10 @@ function detectBinary(buffer: Buffer): boolean {
   if (suspicious / sampleLength > 0.1) return true;
 
   try {
-    new TextDecoder("utf-8", { fatal: true }).decode(buffer.subarray(0, sampleLength));
+    new TextDecoder("utf-8", { fatal: true }).decode(
+      buffer.subarray(0, sampleLength),
+      { stream: buffer.length > sampleLength }
+    );
     return false;
   } catch {
     return true;
@@ -155,11 +158,12 @@ function parsePorcelain(output: string): WorkspaceChange[] {
       }
     }
 
+    const untracked = x === "?" && y === "?";
     const change: WorkspaceChange = {
       path: toWorkspacePath(path),
       status: changeStatus(x, y),
-      staged: x !== " " && x !== "?",
-      unstaged: y !== " " && y !== "?"
+      staged: !untracked && x !== " ",
+      unstaged: untracked || y !== " "
     };
     if (oldPath) change.oldPath = toWorkspacePath(oldPath);
     changes.push(change);
@@ -262,6 +266,7 @@ export class LocalWorkspaceRuntime implements WorkspaceRuntime {
       }
 
       if (!targetInfo.isDirectory() && !targetInfo.isFile()) continue;
+      if (targetInfo.isDirectory() && HIDDEN_HEAVY_DIRECTORIES.has(entry.name)) continue;
 
       const item: WorkspaceEntry = {
         path: toWorkspacePath(workspacePath),

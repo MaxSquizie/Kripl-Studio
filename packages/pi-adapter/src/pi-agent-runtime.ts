@@ -7,6 +7,7 @@ import type {
   AgentStartOptions,
   NetworkMode,
   PermissionPolicy,
+  ToolBridgeConnection,
   Unsubscribe
 } from "@kripl/core";
 import { DEFAULT_PERMISSION_POLICY } from "@kripl/permissions";
@@ -16,6 +17,7 @@ import {
   type PiLocalModelConfig,
   writePiLocalModelConfig
 } from "./pi-local-config.js";
+import { writePiBrowserTools } from "./pi-browser-tools.js";
 import { writePiPermissionGate } from "./pi-permission-gate.js";
 import { writePiWebTools } from "./pi-web-tools.js";
 import { PiRpcProcess } from "./rpc-process.js";
@@ -28,6 +30,7 @@ export interface PiAgentRuntimeOptions {
   localModel: PiLocalModelConfig;
   networkMode?: NetworkMode;
   permissionPolicy?: PermissionPolicy;
+  toolBridge?: ToolBridgeConnection;
 }
 
 function responseError(response: JsonRecord): string | undefined {
@@ -62,7 +65,8 @@ export class PiAgentRuntime implements AgentRuntime {
           this.options.agentDir,
           this.options.permissionPolicy ?? DEFAULT_PERMISSION_POLICY
         ),
-        writePiWebTools(this.options.agentDir, networkMode)
+        writePiWebTools(this.options.agentDir, networkMode),
+        writePiBrowserTools(this.options.agentDir)
       ]);
 
       this.unsubscribeRpc = this.rpc.subscribe((event) => {
@@ -75,7 +79,8 @@ export class PiAgentRuntime implements AgentRuntime {
       const rpcOptions = {
         agentDir: this.options.agentDir,
         ...(this.options.sessionDir ? { sessionDir: this.options.sessionDir } : {}),
-        ...(this.options.networkMode ? { networkMode: this.options.networkMode } : {})
+        ...(this.options.networkMode ? { networkMode: this.options.networkMode } : {}),
+        ...(this.options.toolBridge ? { toolBridge: this.options.toolBridge } : {})
       };
 
       this.rpc.start(options.workspacePath, rpcOptions);

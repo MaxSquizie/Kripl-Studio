@@ -140,3 +140,28 @@ test("memory observation failure degrades inspector without losing the event", a
   assert.match(snapshot.memoryHealth.message, /memory unavailable/);
   assert.equal(snapshot.recentEvents.at(-1).event.type, "user.message");
 });
+
+
+test("inspector truncates large payloads while memory observes the original event", async () => {
+  const memory = new FakeMemory();
+  const runtime = new InspectableContextRuntime({ memory });
+  await runtime.initialize();
+
+  const largeValue = "x".repeat(10_000);
+  await runtime.record({
+    type: "agent.tool",
+    phase: "completed",
+    callId: "large",
+    name: "read",
+    payload: { content: largeValue }
+  });
+
+  assert.equal(memory.observed.length, 1);
+  assert.equal(memory.observed[0].event.payload.content.length, 10_000);
+
+  const retained = runtime.snapshot().recentEvents.at(-1).event;
+  assert.equal(retained.type, "agent.tool");
+  assert.equal(typeof retained.payload, "string");
+  assert.ok(retained.payload.length < 3_000);
+  assert.match(retained.payload, /…$/);
+});

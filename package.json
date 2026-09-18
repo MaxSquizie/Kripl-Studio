@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build:packages": "npm run build --workspace @kripl/core && npm run build --workspace @kripl/app-state && npm run build --workspace @kripl/permissions && npm run build --workspace @kripl/local-openai-provider && npm run build --workspace @kripl/workspace && npm run build --workspace @kripl/terminal && npm run build --workspace @kripl/pi-adapter",
+    "build:packages": "npm run build --workspace @kripl/core && npm run build --workspace @kripl/permissions && npm run build --workspace @kripl/app-state && npm run build --workspace @kripl/local-openai-provider && npm run build --workspace @kripl/workspace && npm run build --workspace @kripl/terminal && npm run build --workspace @kripl/pi-adapter",
     "dev": "npm run build:packages && npm run dev --workspace @kripl/desktop",
     "build": "npm run build:packages && npm run build --workspace @kripl/desktop",
     "typecheck": "npm run build:packages && npm run typecheck --workspace @kripl/desktop",

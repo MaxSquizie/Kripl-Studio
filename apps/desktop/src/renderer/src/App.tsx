@@ -534,7 +534,7 @@ export function App() {
               <strong className="muted">ask</strong>
             </div>
             <div className="status-line">
-              <span>Dangerous shell</span>
+              <span>Shell commands</span>
               <strong className="muted">ask</strong>
             </div>
             <div className="status-line">

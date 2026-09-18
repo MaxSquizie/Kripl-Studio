@@ -2,17 +2,21 @@ import type {
   AgentEvent,
   AgentEventListener,
   AgentInput,
+  AgentInteractionResponse,
   AgentRuntime,
   AgentStartOptions,
   NetworkMode,
+  PermissionPolicy,
   Unsubscribe
 } from "@kripl/core";
+import { DEFAULT_PERMISSION_POLICY } from "@kripl/permissions";
 import { normalizePiEvent } from "./pi-event-normalizer.js";
 import {
   KRIPL_PI_PROVIDER,
   type PiLocalModelConfig,
   writePiLocalModelConfig
 } from "./pi-local-config.js";
+import { writePiPermissionGate } from "./pi-permission-gate.js";
 import { PiRpcProcess } from "./rpc-process.js";
 
 type JsonRecord = Record<string, unknown>;
@@ -22,6 +26,7 @@ export interface PiAgentRuntimeOptions {
   sessionDir?: string;
   localModel: PiLocalModelConfig;
   networkMode?: NetworkMode;
+  permissionPolicy?: PermissionPolicy;
 }
 
 function responseError(response: JsonRecord): string | undefined {
@@ -49,7 +54,13 @@ export class PiAgentRuntime implements AgentRuntime {
     this.emit({ type: "agent.status", status: "starting" });
 
     try {
-      await writePiLocalModelConfig(this.options.agentDir, this.options.localModel);
+      await Promise.all([
+        writePiLocalModelConfig(this.options.agentDir, this.options.localModel),
+        writePiPermissionGate(
+          this.options.agentDir,
+          this.options.permissionPolicy ?? DEFAULT_PERMISSION_POLICY
+        )
+      ]);
 
       this.unsubscribeRpc = this.rpc.subscribe((event) => {
         this.emit({ type: "agent.raw", source: "pi", payload: event });
@@ -124,6 +135,18 @@ export class PiAgentRuntime implements AgentRuntime {
     assertSuccess(response);
 
     this.emit({ type: "agent.status", status: "ready" });
+  }
+
+  async respondToInteraction(response: AgentInteractionResponse): Promise<void> {
+    if (!response.id) throw new Error("Agent interaction response id is required.");
+
+    await this.rpc.sendOneWay({
+      type: "extension_ui_response",
+      id: response.id,
+      ...(typeof response.confirmed === "boolean" ? { confirmed: response.confirmed } : {}),
+      ...(typeof response.value === "string" ? { value: response.value } : {}),
+      ...(response.cancelled === true ? { cancelled: true } : {})
+    });
   }
 
   subscribe(listener: AgentEventListener): Unsubscribe {

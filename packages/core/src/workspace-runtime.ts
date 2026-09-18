@@ -47,6 +47,22 @@ export interface WorkspaceDiff {
   truncated: boolean;
 }
 
+export interface WorkspaceGitStatus {
+  branch?: string;
+  detached: boolean;
+  headSha?: string;
+  staged: number;
+  unstaged: number;
+  untracked: number;
+  conflicted: number;
+}
+
+export interface WorkspaceCommitResult {
+  sha: string;
+  shortSha: string;
+  message: string;
+}
+
 export interface WorkspaceRuntime {
   readonly id: string;
 
@@ -57,6 +73,8 @@ export interface WorkspaceRuntime {
   writeFile(path: string, content: string): Promise<WorkspaceFilePreview>;
   getChanges(): Promise<WorkspaceChange[]>;
   getDiff(path: string): Promise<WorkspaceDiff>;
+  getGitStatus(): Promise<WorkspaceGitStatus>;
+  commit(message: string): Promise<WorkspaceCommitResult>;
   stage(path: string): Promise<void>;
   unstage(path: string): Promise<void>;
   revert(path: string): Promise<void>;

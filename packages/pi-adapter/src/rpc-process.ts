@@ -1,3 +1,4 @@
+import type { NetworkMode } from "@kripl/core";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -12,11 +13,12 @@ interface PendingRequest {
 export interface PiRpcStartOptions {
   agentDir: string;
   sessionDir?: string;
+  networkMode?: NetworkMode;
 }
 
 const rpcEntryPath = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent/rpc-entry"));
 
-const REMOTE_PROVIDER_ENV_KEYS = [
+const CLOUD_MODEL_PROVIDER_ENV_KEYS = [
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_OAUTH_TOKEN",
   "ANT_LING_API_KEY",
@@ -66,18 +68,23 @@ const REMOTE_PROVIDER_ENV_KEYS = [
   "AWS_BEARER_TOKEN_BEDROCK"
 ] as const;
 
-export function createOfflineEnvironment(options: PiRpcStartOptions): NodeJS.ProcessEnv {
+export function createPiEnvironment(options: PiRpcStartOptions): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = { ...process.env };
 
-  for (const key of REMOTE_PROVIDER_ENV_KEYS) {
+  for (const key of CLOUD_MODEL_PROVIDER_ENV_KEYS) {
     delete environment[key];
   }
 
   environment.ELECTRON_RUN_AS_NODE = "1";
-  environment.PI_OFFLINE = "1";
   environment.PI_TELEMETRY = "0";
   environment.PI_SKIP_VERSION_CHECK = "1";
   environment.PI_CODING_AGENT_DIR = options.agentDir;
+
+  if (options.networkMode === "offline") {
+    environment.PI_OFFLINE = "1";
+  } else {
+    delete environment.PI_OFFLINE;
+  }
 
   if (options.sessionDir) {
     environment.PI_CODING_AGENT_SESSION_DIR = options.sessionDir;
@@ -109,7 +116,7 @@ export class PiRpcProcess {
 
     this.child = spawn(process.execPath, [rpcEntryPath], {
       cwd,
-      env: createOfflineEnvironment(options),
+      env: createPiEnvironment(options),
       stdio: ["pipe", "pipe", "pipe"]
     });
 

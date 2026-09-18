@@ -186,3 +186,28 @@
   font-size: 12px;
   line-height: 1.5;
 }
+
+
+.browser-toggle {
+  border: 1px solid #2d3744;
+  border-radius: 999px;
+  background: #151b22;
+  padding: 6px 11px;
+  color: #8793a2;
+  cursor: pointer;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.browser-toggle:hover,
+.browser-toggle.active {
+  border-color: #465873;
+  background: #1b2637;
+  color: #d5dce5;
+}
+
+.browser-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

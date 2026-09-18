@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceGitStatus } from "@kripl/core";
 import { JsonDesktopStateStore } from "@kripl/app-state";
 import { InspectableContextRuntime } from "@kripl/context-runtime";
 import { LocalOpenAIProvider } from "@kripl/local-openai-provider";
@@ -34,6 +34,8 @@ const IPC = {
   workspaceStage: "kripl:workspace-stage",
   workspaceUnstage: "kripl:workspace-unstage",
   workspaceRevert: "kripl:workspace-revert",
+  workspaceGitStatus: "kripl:workspace-git-status",
+  workspaceCommit: "kripl:workspace-commit",
   probeLocalModels: "kripl:probe-local-models",
   agentSessions: "kripl:agent-sessions",
   agentStart: "kripl:agent-start",
@@ -593,6 +595,22 @@ function registerIpc(): void {
     }
     await workspaceRuntime.revert(path);
   });
+
+  ipcMain.handle(IPC.workspaceGitStatus, async (): Promise<WorkspaceGitStatus | null> => {
+    const workspace = workspaceRuntime.descriptor();
+    if (!workspace?.gitRepository) return null;
+    return workspaceRuntime.getGitStatus();
+  });
+
+  ipcMain.handle(
+    IPC.workspaceCommit,
+    async (_event, message: unknown): Promise<WorkspaceCommitResult> => {
+      if (typeof message !== "string" || !message.trim() || message.length > 10_000) {
+        throw new Error("Invalid Git commit message.");
+      }
+      return workspaceRuntime.commit(message);
+    }
+  );
 
   ipcMain.handle(IPC.agentSessions, async (): Promise<AgentSessionSummary[]> => {
     const workspace = workspaceRuntime.descriptor();

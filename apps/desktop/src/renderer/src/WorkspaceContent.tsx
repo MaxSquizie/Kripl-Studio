@@ -1,10 +1,12 @@
 import type { WorkspaceDiff, WorkspaceFilePreview } from "@kripl/core";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 export type WorkspaceView =
   | { type: "agent" }
   | { type: "file"; file: WorkspaceFilePreview }
   | { type: "diff"; diff: WorkspaceDiff };
+
+export type WorkspaceDocumentView = Exclude<WorkspaceView, { type: "agent" }>;
 
 export function activeWorkspacePath(view: WorkspaceView): string | undefined {
   if (view.type === "file") return view.file.path;
@@ -45,19 +47,17 @@ function DiffContent({ patch }: { patch: string }) {
 
 function FileEditor({
   file,
+  draft,
+  onDraftChange,
   onSave
 }: {
   file: WorkspaceFilePreview;
+  draft: string;
+  onDraftChange(path: string, content: string): void;
   onSave(path: string, content: string): Promise<void>;
 }) {
-  const [draft, setDraft] = useState(file.content ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    setDraft(file.content ?? "");
-    setError("");
-  }, [file.path, file.content]);
 
   const editable = !file.binary && !file.truncated;
   const dirty = editable && draft !== (file.content ?? "");
@@ -113,7 +113,7 @@ function FileEditor({
           className="code-editor"
           value={draft}
           spellCheck={false}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={(event) => onDraftChange(file.path, event.target.value)}
           onKeyDown={(event) => {
             if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
               event.preventDefault();
@@ -214,14 +214,16 @@ function DiffReview({
 
 export function WorkspaceContent({
   view,
-  onBackToAgent,
+  draft,
+  onDraftChange,
   onSaveFile,
   onStage,
   onUnstage,
   onRevert
 }: {
-  view: Exclude<WorkspaceView, { type: "agent" }>;
-  onBackToAgent(): void;
+  view: WorkspaceDocumentView;
+  draft?: string;
+  onDraftChange(path: string, content: string): void;
   onSaveFile(path: string, content: string): Promise<void>;
   onStage(path: string): Promise<void>;
   onUnstage(path: string): Promise<void>;
@@ -236,14 +238,17 @@ export function WorkspaceContent({
           <span className="eyebrow">{view.type === "file" ? "Editor" : "Git diff"}</span>
           <h1>{path}</h1>
         </div>
-        <button className="secondary-button" type="button" onClick={onBackToAgent}>
-          Agent
-        </button>
+        <span className="engine-label">{view.type === "file" ? "workspace file" : "review"}</span>
       </div>
 
       <div className="workspace-content">
         {view.type === "file" ? (
-          <FileEditor file={view.file} onSave={onSaveFile} />
+          <FileEditor
+            file={view.file}
+            draft={draft ?? view.file.content ?? ""}
+            onDraftChange={onDraftChange}
+            onSave={onSaveFile}
+          />
         ) : (
           <DiffReview
             diff={view.diff}

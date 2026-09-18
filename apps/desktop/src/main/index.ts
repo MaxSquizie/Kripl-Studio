@@ -126,6 +126,31 @@ function forwardAgentEvent(target: Electron.WebContents, event: AgentEvent): voi
   target.send(IPC.agentEvent, event);
 }
 
+async function initializeBrowserRuntime(window: BrowserWindow): Promise<void> {
+  browserUnsubscribe?.();
+  browserUnsubscribe = undefined;
+
+  browserRuntime?.dispose();
+  browserRuntime = undefined;
+
+  if (toolBridgeServer) {
+    await toolBridgeServer.dispose();
+    toolBridgeServer = undefined;
+  }
+
+  const runtime = new BrowserRuntime(window);
+  const bridge = new ToolBridgeServer(runtime);
+  await bridge.start();
+
+  browserRuntime = runtime;
+  toolBridgeServer = bridge;
+  browserUnsubscribe = runtime.subscribe((state) => {
+    if (!window.webContents.isDestroyed()) {
+      window.webContents.send(IPC.browserState, state);
+    }
+  });
+}
+
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1440,
@@ -201,6 +226,11 @@ function registerIpc(): void {
 
       await disposeActiveAgent();
 
+      const toolBridge = toolBridgeServer?.getConnection();
+      if (!toolBridge) {
+        throw new Error("Kripl browser tool bridge is not ready.");
+      }
+
       const userData = app.getPath("userData");
       const agent = new PiAgentRuntime({
         agentDir: join(userData, "pi-agent"),
@@ -210,7 +240,7 @@ function registerIpc(): void {
           modelId: localModel.modelId
         },
         networkMode: "online",
-        toolBridge: toolBridgeServer?.getConnection()
+        toolBridge
       });
 
       activeAgent = agent;
@@ -312,33 +342,12 @@ function registerIpc(): void {
 void app.whenReady().then(async () => {
   registerIpc();
   const window = createWindow();
-
-  browserRuntime = new BrowserRuntime(window);
-  toolBridgeServer = new ToolBridgeServer(browserRuntime);
-  await toolBridgeServer.start();
-
-  browserUnsubscribe = browserRuntime.subscribe((state) => {
-    if (!window.webContents.isDestroyed()) {
-      window.webContents.send(IPC.browserState, state);
-    }
-  });
+  await initializeBrowserRuntime(window);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       const nextWindow = createWindow();
-      browserUnsubscribe?.();
-      browserRuntime?.dispose();
-      browserRuntime = new BrowserRuntime(nextWindow);
-      void toolBridgeServer?.dispose().then(async () => {
-        if (!browserRuntime) return;
-        toolBridgeServer = new ToolBridgeServer(browserRuntime);
-        await toolBridgeServer.start();
-      });
-      browserUnsubscribe = browserRuntime.subscribe((state) => {
-        if (!nextWindow.webContents.isDestroyed()) {
-          nextWindow.webContents.send(IPC.browserState, state);
-        }
-      });
+      void initializeBrowserRuntime(nextWindow);
     }
   });
 });

@@ -1,7 +1,8 @@
 import type {
   BrowserSnapshot,
   BrowserSnapshotElement,
-  BrowserState
+  BrowserState,
+  NetworkMode
 } from "@kripl/core";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
@@ -283,6 +284,7 @@ export class BrowserRuntime {
   private lastError: string | undefined;
   private redirectGeneration = 0;
   private bottomInset = 0;
+  private networkMode: NetworkMode = "online";
 
   constructor(private readonly window: BrowserWindow) {
     const browserSession = electronSession.fromPartition(BROWSER_PARTITION, { cache: true });
@@ -290,6 +292,19 @@ export class BrowserRuntime {
     browserSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
     browserSession.on("will-download", (event) => event.preventDefault());
     browserSession.webRequest.onBeforeRequest((details, callback) => {
+      if (this.networkMode === "offline") {
+        try {
+          const url = new URL(details.url);
+          if (url.protocol === "http:" || url.protocol === "https:") {
+            callback({ cancel: true });
+            return;
+          }
+        } catch {
+          callback({ cancel: true });
+          return;
+        }
+      }
+
       void shouldBlockRequestUrl(details.url)
         .then((blocked) => callback({ cancel: blocked }))
         .catch(() => callback({ cancel: true }));
@@ -371,7 +386,25 @@ export class BrowserRuntime {
     return state;
   }
 
+  setNetworkMode(mode: NetworkMode): void {
+    this.networkMode = mode;
+
+    if (mode === "offline") {
+      this.visible = false;
+      this.loading = false;
+      this.lastError = undefined;
+      this.view.setVisible(false);
+      void this.view.webContents.loadURL("about:blank").catch(() => {});
+    }
+
+    this.emit();
+  }
+
   setVisible(visible: boolean): BrowserState {
+    if (visible && this.networkMode === "offline") {
+      throw new Error("Browser is disabled while Kripl Studio is offline.");
+    }
+
     this.visible = visible;
     this.view.setVisible(visible);
     if (visible) this.layout();
@@ -385,6 +418,10 @@ export class BrowserRuntime {
   }
 
   async navigate(input: string): Promise<BrowserState> {
+    if (this.networkMode === "offline") {
+      throw new Error("Browser navigation is disabled while Kripl Studio is offline.");
+    }
+
     const url = await assertPublicBrowserUrl(input);
     this.setVisible(true);
     this.lastError = undefined;

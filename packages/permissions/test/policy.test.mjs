@@ -17,7 +17,6 @@ test("default policy keeps routine coding actions automatic", () => {
     resolvePermissionEffect(DEFAULT_PERMISSION_POLICY, "filesystem.write.workspace"),
     "allow"
   );
-  assert.equal(resolvePermissionEffect(DEFAULT_PERMISSION_POLICY, "shell.safe"), "allow");
   assert.equal(resolvePermissionEffect(DEFAULT_PERMISSION_POLICY, "network.read"), "allow");
 });
 
@@ -26,6 +25,7 @@ test("default policy asks before risky boundaries", () => {
     resolvePermissionEffect(DEFAULT_PERMISSION_POLICY, "filesystem.write.outside"),
     "ask"
   );
+  assert.equal(resolvePermissionEffect(DEFAULT_PERMISSION_POLICY, "shell.safe"), "ask");
   assert.equal(resolvePermissionEffect(DEFAULT_PERMISSION_POLICY, "shell.dangerous"), "ask");
   assert.equal(resolvePermissionEffect(DEFAULT_PERMISSION_POLICY, "network.write"), "ask");
 });

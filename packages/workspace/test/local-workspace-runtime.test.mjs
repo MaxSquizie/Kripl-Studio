@@ -247,3 +247,84 @@ test("revert removes an untracked file only when explicitly requested", async ()
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+
+test("reports local Git branch, HEAD and staged/unstaged counters", async () => {
+  const directory = await createGitWorkspace();
+  const runtime = new LocalWorkspaceRuntime();
+
+  try {
+    await writeFile(join(directory, "README.md"), "# Changed\n", "utf8");
+    await writeFile(join(directory, "scratch.txt"), "untracked\n", "utf8");
+    await runtime.open(directory);
+    await runtime.stage("README.md");
+
+    const status = await runtime.getGitStatus();
+    assert.equal(typeof status.branch, "string");
+    assert.equal(status.detached, false);
+    assert.match(status.headSha ?? "", /^[0-9a-f]{40}$/);
+    assert.equal(status.staged, 1);
+    assert.equal(status.unstaged, 0);
+    assert.equal(status.untracked, 1);
+    assert.equal(status.conflicted, 0);
+  } finally {
+    await runtime.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("commits only staged changes and leaves other working tree changes intact", async () => {
+  const directory = await createGitWorkspace();
+  const runtime = new LocalWorkspaceRuntime();
+
+  try {
+    await writeFile(join(directory, "README.md"), "# Commit me\n", "utf8");
+    await writeFile(join(directory, "src", "index.ts"), "export const value = 99;\n", "utf8");
+    await writeFile(join(directory, "scratch.txt"), "leave me\n", "utf8");
+    await runtime.open(directory);
+    await runtime.stage("README.md");
+
+    const result = await runtime.commit("test: staged only");
+    assert.match(result.sha, /^[0-9a-f]{40}$/);
+    assert.match(result.shortSha, /^[0-9a-f]{7,12}$/);
+    assert.equal(result.message, "test: staged only");
+
+    const { stdout: subject } = await execFileAsync(
+      "git",
+      ["show", "-s", "--format=%s", "HEAD"],
+      { cwd: directory, windowsHide: true, encoding: "utf8" }
+    );
+    assert.equal(subject.trim(), "test: staged only");
+
+    const changes = await runtime.getChanges();
+    assert.equal(changes.some((item) => item.path === "README.md"), false);
+    assert.equal(changes.find((item) => item.path === "src/index.ts")?.unstaged, true);
+    assert.equal(changes.find((item) => item.path === "scratch.txt")?.status, "untracked");
+
+    const status = await runtime.getGitStatus();
+    assert.equal(status.staged, 0);
+    assert.equal(status.unstaged, 1);
+    assert.equal(status.untracked, 1);
+  } finally {
+    await runtime.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("rejects commits without staged changes", async () => {
+  const directory = await createGitWorkspace();
+  const runtime = new LocalWorkspaceRuntime();
+
+  try {
+    await writeFile(join(directory, "README.md"), "# Unstaged\n", "utf8");
+    await runtime.open(directory);
+
+    await assert.rejects(
+      () => runtime.commit("should fail"),
+      /no staged changes/i
+    );
+  } finally {
+    await runtime.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

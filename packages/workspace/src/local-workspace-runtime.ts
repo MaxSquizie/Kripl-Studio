@@ -1,8 +1,10 @@
 import type {
   WorkspaceChange,
   WorkspaceChangeStatus,
+  WorkspaceCommitResult,
   WorkspaceDescriptor,
   WorkspaceDiff,
+  WorkspaceGitStatus,
   WorkspaceEntry,
   WorkspaceFilePreview,
   WorkspaceRuntime
@@ -408,6 +410,74 @@ export class LocalWorkspaceRuntime implements WorkspaceRuntime {
       unstaged: change.unstaged,
       patch: truncated.patch,
       truncated: truncated.truncated
+    };
+  }
+
+  async getGitStatus(): Promise<WorkspaceGitStatus> {
+    const root = this.requireGitRoot();
+    const changes = await this.getChanges();
+
+    let branch: string | undefined;
+    let headSha: string | undefined;
+
+    const branchOutput = await this.runGit(["branch", "--show-current"], root);
+    const branchName = branchOutput.trim();
+    if (branchName) branch = branchName;
+
+    try {
+      const sha = (await this.runGit(["rev-parse", "HEAD"], root)).trim();
+      if (sha) headSha = sha;
+    } catch {
+      // Repositories without an initial commit have no HEAD object yet.
+    }
+
+    return {
+      ...(branch ? { branch } : {}),
+      detached: !branch && Boolean(headSha),
+      ...(headSha ? { headSha } : {}),
+      staged: changes.filter((change) => change.staged).length,
+      unstaged: changes.filter((change) => change.unstaged && change.status !== "untracked").length,
+      untracked: changes.filter((change) => change.status === "untracked").length,
+      conflicted: changes.filter((change) => change.status === "conflicted").length
+    };
+  }
+
+  async commit(message: string): Promise<WorkspaceCommitResult> {
+    const root = this.requireGitRoot();
+    const normalized = message.trim();
+
+    if (!normalized) throw new Error("Commit message cannot be empty.");
+    if (normalized.length > 10_000) {
+      throw new Error("Commit message exceeds the 10,000 character limit.");
+    }
+    if (normalized.includes("\0")) {
+      throw new Error("Commit message contains an invalid null character.");
+    }
+
+    const changes = await this.getChanges();
+    if (changes.some((change) => change.status === "conflicted")) {
+      throw new Error("Resolve Git conflicts before committing.");
+    }
+    if (!changes.some((change) => change.staged)) {
+      throw new Error("There are no staged changes to commit.");
+    }
+
+    await this.runGit(
+      ["commit", "--no-verify", "--no-gpg-sign", "-m", normalized],
+      root
+    );
+
+    const sha = (await this.runGit(["rev-parse", "HEAD"], root)).trim();
+    const shortSha = (await this.runGit(["rev-parse", "--short=12", "HEAD"], root)).trim();
+
+    if (!sha || !shortSha) {
+      throw new Error("Git commit completed but the new HEAD could not be resolved.");
+    }
+
+    return {
+      sha,
+      shortSha,
+      message: normalized
     };
   }
 

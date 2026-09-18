@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceGitStatus } from "@kripl/core";
 
 export {};
 
@@ -34,6 +34,8 @@ declare global {
       stageWorkspaceChange(path: string): Promise<void>;
       unstageWorkspaceChange(path: string): Promise<void>;
       revertWorkspaceChange(path: string): Promise<void>;
+      getWorkspaceGitStatus(): Promise<WorkspaceGitStatus | null>;
+      commitWorkspaceChanges(message: string): Promise<WorkspaceCommitResult>;
       probeLocalModels(endpoint: string): Promise<{
         ok: boolean;
         endpoint: string;

@@ -1184,3 +1184,96 @@ button {
   font-size: 10px;
   line-height: 1.45;
 }
+
+
+.git-status-card {
+  gap: 10px;
+  border-color: #2f463e;
+  background:
+    linear-gradient(180deg, rgba(48, 82, 71, 0.12), transparent 70%),
+    #101614;
+}
+
+.git-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.git-branch {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #355148;
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: #9fc2b5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 9px/1.2 "Cascadia Code", Consolas, monospace;
+}
+
+.git-counts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.git-counts span {
+  border: 1px solid #263a32;
+  border-radius: 7px;
+  background: #0c1310;
+  padding: 6px 7px;
+  color: #71867e;
+  font-size: 9px;
+}
+
+.git-counts strong {
+  color: #abc6bc;
+  font-size: 10px;
+}
+
+.git-counts .conflicted,
+.git-counts .conflicted strong {
+  border-color: #684047;
+  color: #d49ca3;
+}
+
+.git-head {
+  margin: 0;
+  overflow: hidden;
+  color: #61766e;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 9px/1.4 "Cascadia Code", Consolas, monospace;
+}
+
+.git-commit-message {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 62px;
+  resize: vertical;
+  border: 1px solid #314b42;
+  border-radius: 7px;
+  background: #0d1512;
+  padding: 8px 9px;
+  color: #bfd5cd;
+  outline: none;
+  font: 10px/1.45 "Cascadia Code", Consolas, monospace;
+}
+
+.git-commit-message:focus {
+  border-color: #5b957f;
+  box-shadow: 0 0 0 2px rgba(91, 149, 127, 0.13);
+}
+
+.git-commit-message:disabled {
+  color: #5f716b;
+  opacity: 0.72;
+}
+
+.git-status-card .primary-button:not(:disabled) {
+  border-color: #477967;
+  background: #1c4437;
+  color: #d6e8e1;
+}

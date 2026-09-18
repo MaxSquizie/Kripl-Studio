@@ -1,17 +1,27 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { dirname } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
 import { createPiEnvironment } from "../dist/rpc-process.js";
 import { writePiPermissionGate } from "../dist/pi-permission-gate.js";
+import { writePiWebTools } from "../dist/pi-web-tools.js";
 
 import { normalizePiEvent } from "../dist/pi-event-normalizer.js";
 import {
   KRIPL_PI_PROVIDER,
   writePiLocalModelConfig
 } from "../dist/pi-local-config.js";
+
+async function loadPiExtensions(paths, cwd) {
+  const packageEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
+  const loaderPath = join(dirname(packageEntry), "core", "extensions", "loader.js");
+  const loader = await import(pathToFileURL(loaderPath).href);
+  return loader.loadExtensions(paths, cwd);
+}
 
 test("writes an isolated Pi provider config for the selected local model", async () => {
   const directory = await mkdtemp(join(tmpdir(), "kripl-pi-"));
@@ -121,6 +131,7 @@ test("Pi uses online network mode by default while keeping the selected model lo
     assert.equal(environment.OPENAI_API_KEY, undefined);
     assert.equal(environment.GITHUB_TOKEN, "tool-secret");
     assert.equal(environment.PI_CODING_AGENT_DIR, "C:/Kripl/pi-agent");
+    assert.equal(environment.KRIPL_NETWORK_MODE, "online");
   } finally {
     if (previousOffline === undefined) delete process.env.PI_OFFLINE;
     else process.env.PI_OFFLINE = previousOffline;
@@ -140,6 +151,7 @@ test("explicit offline mode enables PI_OFFLINE without changing model routing", 
   });
 
   assert.equal(environment.PI_OFFLINE, "1");
+  assert.equal(environment.KRIPL_NETWORK_MODE, "offline");
   assert.equal(environment.PI_TELEMETRY, "0");
   assert.equal(environment.PI_SKIP_VERSION_CHECK, "1");
 });
@@ -207,4 +219,89 @@ test("normalizes Pi extension notifications", () => {
       }
     ]
   );
+});
+
+
+test("generated web extension loads and registers search/open tools", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "kripl-web-tools-"));
+
+  try {
+    await writePiWebTools(directory, "online");
+    const extensionPath = join(directory, "extensions", "kripl-web-tools.ts");
+    const result = await loadPiExtensions([extensionPath], directory);
+
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.extensions.length, 1);
+    assert.equal(result.extensions[0]?.tools.has("web_search"), true);
+    assert.equal(result.extensions[0]?.tools.has("web_open"), true);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("web tools fail closed in offline mode before issuing requests", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "kripl-web-offline-"));
+  const previousMode = process.env.KRIPL_NETWORK_MODE;
+  process.env.KRIPL_NETWORK_MODE = "offline";
+
+  try {
+    await writePiWebTools(directory, "offline");
+    const extensionPath = join(directory, "extensions", "kripl-web-tools.ts");
+    const result = await loadPiExtensions([extensionPath], directory);
+    assert.deepEqual(result.errors, []);
+
+    const search = result.extensions[0]?.tools.get("web_search");
+    assert.ok(search);
+    await assert.rejects(
+      () => search.definition.execute("call-1", { query: "Kripl Studio" }, undefined, undefined, undefined),
+      /offline mode/
+    );
+  } finally {
+    if (previousMode === undefined) delete process.env.KRIPL_NETWORK_MODE;
+    else process.env.KRIPL_NETWORK_MODE = previousMode;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("web_open blocks localhost without touching the network", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "kripl-web-ssrf-"));
+  const previousMode = process.env.KRIPL_NETWORK_MODE;
+  process.env.KRIPL_NETWORK_MODE = "online";
+
+  try {
+    await writePiWebTools(directory, "online");
+    const extensionPath = join(directory, "extensions", "kripl-web-tools.ts");
+    const result = await loadPiExtensions([extensionPath], directory);
+    assert.deepEqual(result.errors, []);
+
+    const open = result.extensions[0]?.tools.get("web_open");
+    assert.ok(open);
+    await assert.rejects(
+      () => open.definition.execute("call-2", { url: "http://127.0.0.1:4317/" }, undefined, undefined, undefined),
+      /Private or local network addresses are blocked/
+    );
+  } finally {
+    if (previousMode === undefined) delete process.env.KRIPL_NETWORK_MODE;
+    else process.env.KRIPL_NETWORK_MODE = previousMode;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("permission extension classifies Kripl web tools as network scopes", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "kripl-web-permissions-"));
+
+  try {
+    await writePiPermissionGate(directory);
+    const extension = await readFile(
+      join(directory, "extensions", "kripl-permissions.ts"),
+      "utf8"
+    );
+
+    assert.match(extension, /event\.toolName === "web_search"/);
+    assert.match(extension, /"network\.search"/);
+    assert.match(extension, /event\.toolName === "web_open"/);
+    assert.match(extension, /"network\.read"/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

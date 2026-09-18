@@ -66,6 +66,7 @@ export function createPiEnvironment(options: PiRpcStartOptions): NodeJS.ProcessE
   environment.PI_TELEMETRY = "0";
   environment.PI_SKIP_VERSION_CHECK = "1";
   environment.PI_CODING_AGENT_DIR = options.agentDir;
+  environment.KRIPL_NETWORK_MODE = options.networkMode ?? "online";
 
   if (options.networkMode === "offline") {
     environment.PI_OFFLINE = "1";

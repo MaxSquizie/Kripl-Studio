@@ -17,6 +17,7 @@ import {
   writePiLocalModelConfig
 } from "./pi-local-config.js";
 import { writePiPermissionGate } from "./pi-permission-gate.js";
+import { writePiWebTools } from "./pi-web-tools.js";
 import { PiRpcProcess } from "./rpc-process.js";
 
 type JsonRecord = Record<string, unknown>;
@@ -54,12 +55,14 @@ export class PiAgentRuntime implements AgentRuntime {
     this.emit({ type: "agent.status", status: "starting" });
 
     try {
+      const networkMode = this.options.networkMode ?? "online";
       await Promise.all([
         writePiLocalModelConfig(this.options.agentDir, this.options.localModel),
         writePiPermissionGate(
           this.options.agentDir,
           this.options.permissionPolicy ?? DEFAULT_PERMISSION_POLICY
-        )
+        ),
+        writePiWebTools(this.options.agentDir, networkMode)
       ]);
 
       this.unsubscribeRpc = this.rpc.subscribe((event) => {

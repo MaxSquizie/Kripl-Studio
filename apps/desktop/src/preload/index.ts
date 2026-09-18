@@ -1,9 +1,13 @@
-import type { AgentEvent, AgentInteractionResponse, BrowserState } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, BrowserState, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
 import { contextBridge, ipcRenderer } from "electron";
 
 const IPC = {
   appInfo: "kripl:app-info",
   pickWorkspace: "kripl:pick-workspace",
+  workspaceList: "kripl:workspace-list",
+  workspaceReadFile: "kripl:workspace-read-file",
+  workspaceChanges: "kripl:workspace-changes",
+  workspaceDiff: "kripl:workspace-diff",
   probeLocalModels: "kripl:probe-local-models",
   agentStart: "kripl:agent-start",
   agentSend: "kripl:agent-send",
@@ -31,7 +35,17 @@ const api = {
       modelRouting: "local-only" | "allow-remote";
     }>,
 
-  pickWorkspace: () => ipcRenderer.invoke(IPC.pickWorkspace) as Promise<string | null>,
+  pickWorkspace: () => ipcRenderer.invoke(IPC.pickWorkspace) as Promise<WorkspaceDescriptor | null>,
+
+  listWorkspace: (path = "") => ipcRenderer.invoke(IPC.workspaceList, path) as Promise<WorkspaceEntry[]>,
+
+  readWorkspaceFile: (path: string) =>
+    ipcRenderer.invoke(IPC.workspaceReadFile, path) as Promise<WorkspaceFilePreview>,
+
+  getWorkspaceChanges: () => ipcRenderer.invoke(IPC.workspaceChanges) as Promise<WorkspaceChange[]>,
+
+  getWorkspaceDiff: (path: string) =>
+    ipcRenderer.invoke(IPC.workspaceDiff, path) as Promise<WorkspaceDiff>,
 
   probeLocalModels: (endpoint: string) =>
     ipcRenderer.invoke(IPC.probeLocalModels, endpoint) as Promise<{
@@ -48,7 +62,7 @@ const api = {
       error?: string;
     }>,
 
-  startAgent: (request: { workspacePath: string; endpoint: string; modelId: string }) =>
+  startAgent: (request: { endpoint: string; modelId: string }) =>
     ipcRenderer.invoke(IPC.agentStart, request) as Promise<ActionResult>,
 
   sendAgentMessage: (message: string) =>

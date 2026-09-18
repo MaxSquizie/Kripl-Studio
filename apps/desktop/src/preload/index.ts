@@ -14,8 +14,12 @@ const IPC = {
   contextSnapshot: "kripl:context-snapshot",
   workspaceList: "kripl:workspace-list",
   workspaceReadFile: "kripl:workspace-read-file",
+  workspaceWriteFile: "kripl:workspace-write-file",
   workspaceChanges: "kripl:workspace-changes",
   workspaceDiff: "kripl:workspace-diff",
+  workspaceStage: "kripl:workspace-stage",
+  workspaceUnstage: "kripl:workspace-unstage",
+  workspaceRevert: "kripl:workspace-revert",
   probeLocalModels: "kripl:probe-local-models",
   agentSessions: "kripl:agent-sessions",
   agentStart: "kripl:agent-start",
@@ -86,10 +90,22 @@ const api = {
   readWorkspaceFile: (path: string) =>
     ipcRenderer.invoke(IPC.workspaceReadFile, path) as Promise<WorkspaceFilePreview>,
 
+  writeWorkspaceFile: (path: string, content: string) =>
+    ipcRenderer.invoke(IPC.workspaceWriteFile, path, content) as Promise<WorkspaceFilePreview>,
+
   getWorkspaceChanges: () => ipcRenderer.invoke(IPC.workspaceChanges) as Promise<WorkspaceChange[]>,
 
   getWorkspaceDiff: (path: string) =>
     ipcRenderer.invoke(IPC.workspaceDiff, path) as Promise<WorkspaceDiff>,
+
+  stageWorkspaceChange: (path: string) =>
+    ipcRenderer.invoke(IPC.workspaceStage, path) as Promise<void>,
+
+  unstageWorkspaceChange: (path: string) =>
+    ipcRenderer.invoke(IPC.workspaceUnstage, path) as Promise<void>,
+
+  revertWorkspaceChange: (path: string) =>
+    ipcRenderer.invoke(IPC.workspaceRevert, path) as Promise<void>,
 
   probeLocalModels: (endpoint: string) =>
     ipcRenderer.invoke(IPC.probeLocalModels, endpoint) as Promise<{

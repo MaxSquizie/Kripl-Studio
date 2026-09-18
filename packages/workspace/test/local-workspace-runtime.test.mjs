@@ -116,3 +116,29 @@ test("reports modified and untracked Git changes with textual diffs", async () =
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+
+test("combines staged and unstaged patches for the same file", async () => {
+  const directory = await createGitWorkspace();
+  const runtime = new LocalWorkspaceRuntime();
+
+  try {
+    await writeFile(join(directory, "README.md"), "# Staged version\n", "utf8");
+    await git(directory, ["add", "README.md"]);
+    await writeFile(join(directory, "README.md"), "# Working version\n", "utf8");
+    await runtime.open(directory);
+
+    const change = (await runtime.getChanges()).find((item) => item.path === "README.md");
+    assert.equal(change?.staged, true);
+    assert.equal(change?.unstaged, true);
+
+    const diff = await runtime.getDiff("README.md");
+    assert.match(diff.patch, /\[staged\]/);
+    assert.match(diff.patch, /\[unstaged\]/);
+    assert.match(diff.patch, /Staged version/);
+    assert.match(diff.patch, /Working version/);
+  } finally {
+    await runtime.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

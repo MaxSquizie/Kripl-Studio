@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -137,6 +137,110 @@ test("combines staged and unstaged patches for the same file", async () => {
     assert.match(diff.patch, /\[unstaged\]/);
     assert.match(diff.patch, /Staged version/);
     assert.match(diff.patch, /Working version/);
+  } finally {
+    await runtime.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+
+test("edits existing text files and reports the saved preview", async () => {
+  const directory = await createGitWorkspace();
+  const runtime = new LocalWorkspaceRuntime();
+
+  try {
+    await runtime.open(directory);
+    const saved = await runtime.writeFile("src/index.ts", "export const value = 42;\n");
+
+    assert.equal(saved.binary, false);
+    assert.equal(saved.truncated, false);
+    assert.match(saved.content ?? "", /value = 42/);
+    assert.equal(
+      await readFile(join(directory, "src", "index.ts"), "utf8"),
+      "export const value = 42;\n"
+    );
+
+    await assert.rejects(
+      () => runtime.writeFile("../outside.ts", "nope"),
+      /escapes the project root/
+    );
+  } finally {
+    await runtime.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("stages and unstages one changed file without touching another", async () => {
+  const directory = await createGitWorkspace();
+  const runtime = new LocalWorkspaceRuntime();
+
+  try {
+    await writeFile(join(directory, "README.md"), "# Changed\n", "utf8");
+    await writeFile(join(directory, "src", "index.ts"), "export const value = 3;\n", "utf8");
+    await runtime.open(directory);
+
+    await runtime.stage("README.md");
+    let changes = await runtime.getChanges();
+    const readmeStaged = changes.find((item) => item.path === "README.md");
+    const sourceUnstaged = changes.find((item) => item.path === "src/index.ts");
+
+    assert.equal(readmeStaged?.staged, true);
+    assert.equal(readmeStaged?.unstaged, false);
+    assert.equal(sourceUnstaged?.staged, false);
+    assert.equal(sourceUnstaged?.unstaged, true);
+
+    await runtime.unstage("README.md");
+    changes = await runtime.getChanges();
+    const readmeUnstaged = changes.find((item) => item.path === "README.md");
+    assert.equal(readmeUnstaged?.staged, false);
+    assert.equal(readmeUnstaged?.unstaged, true);
+  } finally {
+    await runtime.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("reverts tracked changes back to HEAD", async () => {
+  const directory = await createGitWorkspace();
+  const runtime = new LocalWorkspaceRuntime();
+
+  try {
+    await writeFile(join(directory, "README.md"), "# Staged\n", "utf8");
+    await git(directory, ["add", "README.md"]);
+    await writeFile(join(directory, "README.md"), "# Working\n", "utf8");
+    await runtime.open(directory);
+
+    await runtime.revert("README.md");
+
+    assert.equal(await readFile(join(directory, "README.md"), "utf8"), "# Workspace\n");
+    assert.equal(
+      (await runtime.getChanges()).some((item) => item.path === "README.md"),
+      false
+    );
+  } finally {
+    await runtime.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("revert removes an untracked file only when explicitly requested", async () => {
+  const directory = await createGitWorkspace();
+  const runtime = new LocalWorkspaceRuntime();
+
+  try {
+    const path = join(directory, "scratch.txt");
+    await writeFile(path, "temporary\n", "utf8");
+    await runtime.open(directory);
+
+    const before = (await runtime.getChanges()).find((item) => item.path === "scratch.txt");
+    assert.equal(before?.status, "untracked");
+
+    await runtime.revert("scratch.txt");
+    await assert.rejects(() => access(path));
+    assert.equal(
+      (await runtime.getChanges()).some((item) => item.path === "scratch.txt"),
+      false
+    );
   } finally {
     await runtime.dispose();
     await rm(directory, { recursive: true, force: true });

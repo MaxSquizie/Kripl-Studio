@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInteractionRequest, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, BrowserState, ContextInspectorSnapshot, DesktopRuntimeSettings, DesktopUiState, RecentProject, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceEntry, WorkspaceGitStatus } from "@kripl/core";
+import type { AgentEvent, AgentInteractionRequest, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, BrowserState, ContextInspectorSnapshot, DesktopRuntimeSettings, DesktopUiState, RecentProject, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceEntry, WorkspaceFilePreview, WorkspaceGitStatus } from "@kripl/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import { WorkspaceContent, activeWorkspacePath, type WorkspaceDocumentView, type WorkspaceView } from "./WorkspaceContent";
@@ -545,13 +545,9 @@ export function App() {
         try {
           const file = await window.kripl.readWorkspaceFile(workspaceView.file.path);
           const view: WorkspaceDocumentView = { type: "file", file };
+          reconcileEditorDraft(file);
           setWorkspaceView(view);
           setWorkspaceTabs((current) => upsertWorkspaceTab(current, view));
-          setEditorDrafts((current) =>
-            Object.prototype.hasOwnProperty.call(current, file.path)
-              ? current
-              : { ...current, [file.path]: file.content ?? "" }
-          );
         } catch {
           const staleKey = workspaceViewKey(workspaceView);
           setWorkspaceTabs((current) =>
@@ -614,16 +610,32 @@ export function App() {
     }
   }
 
+  function reconcileEditorDraft(file: WorkspaceFilePreview) {
+    const previousTab = workspaceTabs.find(
+      (tab) => tab.type === "file" && tab.file.path === file.path
+    );
+    const previousContent =
+      previousTab?.type === "file" ? previousTab.file.content ?? "" : undefined;
+    const nextContent = file.content ?? "";
+
+    setEditorDrafts((current) => {
+      const existing = current[file.path];
+      const wasDirty =
+        previousContent !== undefined &&
+        existing !== undefined &&
+        existing !== previousContent;
+
+      if (wasDirty || existing === nextContent) return current;
+      return { ...current, [file.path]: nextContent };
+    });
+  }
+
   async function openWorkspaceFile(path: string) {
     try {
       const file = await window.kripl.readWorkspaceFile(path);
       const view: WorkspaceDocumentView = { type: "file", file };
+      reconcileEditorDraft(file);
       setWorkspaceTabs((current) => upsertWorkspaceTab(current, view));
-      setEditorDrafts((current) =>
-        Object.prototype.hasOwnProperty.call(current, path)
-          ? current
-          : { ...current, [path]: file.content ?? "" }
-      );
       setWorkspaceView(view);
       persistWorkspaceUi(view);
     } catch (error) {
@@ -718,12 +730,8 @@ export function App() {
     try {
       const file = await window.kripl.readWorkspaceFile(path);
       const view: WorkspaceDocumentView = { type: "file", file };
+      reconcileEditorDraft(file);
       setWorkspaceTabs((current) => upsertWorkspaceTab(current, view));
-      setEditorDrafts((current) =>
-        Object.prototype.hasOwnProperty.call(current, path)
-          ? current
-          : { ...current, [path]: file.content ?? "" }
-      );
       setWorkspaceView(view);
       persistWorkspaceUi(view);
     } catch {

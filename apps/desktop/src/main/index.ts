@@ -28,8 +28,12 @@ const IPC = {
   contextSnapshot: "kripl:context-snapshot",
   workspaceList: "kripl:workspace-list",
   workspaceReadFile: "kripl:workspace-read-file",
+  workspaceWriteFile: "kripl:workspace-write-file",
   workspaceChanges: "kripl:workspace-changes",
   workspaceDiff: "kripl:workspace-diff",
+  workspaceStage: "kripl:workspace-stage",
+  workspaceUnstage: "kripl:workspace-unstage",
+  workspaceRevert: "kripl:workspace-revert",
   probeLocalModels: "kripl:probe-local-models",
   agentSessions: "kripl:agent-sessions",
   agentStart: "kripl:agent-start",
@@ -532,6 +536,27 @@ function registerIpc(): void {
     }
   );
 
+  ipcMain.handle(
+    IPC.workspaceWriteFile,
+    async (_event, path: unknown, content: unknown): Promise<WorkspaceFilePreview> => {
+      if (typeof path !== "string" || !path || path.length > 32_768) {
+        throw new Error("Invalid workspace file path.");
+      }
+      if (typeof content !== "string" || content.length > 2_500_000) {
+        throw new Error("Invalid workspace file content.");
+      }
+
+      const preview = await workspaceRuntime.writeFile(path, content);
+      void contextRuntime.record({
+        type: "workspace.file.opened",
+        path: preview.path,
+        sizeBytes: preview.size,
+        binary: preview.binary
+      });
+      return preview;
+    }
+  );
+
   ipcMain.handle(IPC.workspaceChanges, async (): Promise<WorkspaceChange[]> => {
     return workspaceRuntime.getChanges();
   });
@@ -546,6 +571,27 @@ function registerIpc(): void {
       path: diff.path
     });
     return diff;
+  });
+
+  ipcMain.handle(IPC.workspaceStage, async (_event, path: unknown): Promise<void> => {
+    if (typeof path !== "string" || !path || path.length > 32_768) {
+      throw new Error("Invalid workspace change path.");
+    }
+    await workspaceRuntime.stage(path);
+  });
+
+  ipcMain.handle(IPC.workspaceUnstage, async (_event, path: unknown): Promise<void> => {
+    if (typeof path !== "string" || !path || path.length > 32_768) {
+      throw new Error("Invalid workspace change path.");
+    }
+    await workspaceRuntime.unstage(path);
+  });
+
+  ipcMain.handle(IPC.workspaceRevert, async (_event, path: unknown): Promise<void> => {
+    if (typeof path !== "string" || !path || path.length > 32_768) {
+      throw new Error("Invalid workspace change path.");
+    }
+    await workspaceRuntime.revert(path);
   });
 
   ipcMain.handle(IPC.agentSessions, async (): Promise<AgentSessionSummary[]> => {

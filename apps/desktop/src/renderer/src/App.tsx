@@ -382,10 +382,46 @@ export function App() {
   async function refreshWorkspace() {
     if (!workspace) return;
     try {
-      await hydrateWorkspace(workspace, {
-        workspaceView: persistedView(workspaceView),
-        expandedDirectories: [...expandedDirectories]
-      });
+      const [rootEntries, changes] = await Promise.all([
+        window.kripl.listWorkspace(),
+        window.kripl.getWorkspaceChanges()
+      ]);
+
+      const entries: Record<string, WorkspaceEntry[]> = { "": rootEntries };
+      const orderedPaths = [...expandedDirectories]
+        .sort((left, right) => left.split("/").length - right.split("/").length)
+        .slice(0, 64);
+
+      for (const path of orderedPaths) {
+        try {
+          entries[path] = await window.kripl.listWorkspace(path);
+        } catch {
+          // Ignore stale directories during refresh.
+        }
+      }
+
+      setWorkspaceEntries(entries);
+      setWorkspaceChanges(changes);
+
+      if (workspaceView.type === "file") {
+        try {
+          const file = await window.kripl.readWorkspaceFile(workspaceView.file.path);
+          setWorkspaceView({ type: "file", file });
+        } catch {
+          const view: WorkspaceView = { type: "agent" };
+          setWorkspaceView(view);
+          persistWorkspaceUi(view);
+        }
+      } else if (workspaceView.type === "diff") {
+        try {
+          const diff = await window.kripl.getWorkspaceDiff(workspaceView.diff.path);
+          setWorkspaceView({ type: "diff", diff });
+        } catch {
+          const view: WorkspaceView = { type: "agent" };
+          setWorkspaceView(view);
+          persistWorkspaceUi(view);
+        }
+      }
     } catch (error) {
       setAgentError(error instanceof Error ? error.message : String(error));
     }

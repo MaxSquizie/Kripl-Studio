@@ -1,9 +1,13 @@
-import type { AgentEvent, AgentInteractionResponse, BrowserState, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, BrowserState, DesktopBootstrapState, DesktopUiState, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
 import { contextBridge, ipcRenderer } from "electron";
 
 const IPC = {
   appInfo: "kripl:app-info",
   pickWorkspace: "kripl:pick-workspace",
+  desktopBootstrap: "kripl:desktop-bootstrap",
+  openRecentProject: "kripl:open-recent-project",
+  forgetRecentProject: "kripl:forget-recent-project",
+  saveDesktopUi: "kripl:save-desktop-ui",
   workspaceList: "kripl:workspace-list",
   workspaceReadFile: "kripl:workspace-read-file",
   workspaceChanges: "kripl:workspace-changes",
@@ -42,7 +46,18 @@ const api = {
       modelRouting: "local-only" | "allow-remote";
     }>,
 
+  getDesktopBootstrap: () => ipcRenderer.invoke(IPC.desktopBootstrap) as Promise<DesktopBootstrapState>,
+
   pickWorkspace: () => ipcRenderer.invoke(IPC.pickWorkspace) as Promise<WorkspaceDescriptor | null>,
+
+  openRecentProject: (path: string) =>
+    ipcRenderer.invoke(IPC.openRecentProject, path) as Promise<WorkspaceDescriptor>,
+
+  forgetRecentProject: (path: string) =>
+    ipcRenderer.invoke(IPC.forgetRecentProject, path) as Promise<RecentProject[]>,
+
+  saveDesktopUi: (ui: DesktopUiState) =>
+    ipcRenderer.invoke(IPC.saveDesktopUi, ui) as Promise<void>,
 
   listWorkspace: (path = "") => ipcRenderer.invoke(IPC.workspaceList, path) as Promise<WorkspaceEntry[]>,
 

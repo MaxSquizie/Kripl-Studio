@@ -753,6 +753,10 @@ void app.whenReady().then(async () => {
 app.on("before-quit", () => {
   browserUnsubscribe?.();
   browserUnsubscribe = undefined;
+  terminalUnsubscribe?.();
+  terminalUnsubscribe = undefined;
+  contextUnsubscribe?.();
+  contextUnsubscribe = undefined;
   browserRuntime?.dispose();
   browserRuntime = undefined;
   void toolBridgeServer?.dispose();

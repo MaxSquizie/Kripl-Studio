@@ -9,7 +9,7 @@ on:
 jobs:
   verify:
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,3 +30,13 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Package Windows
+        run: npm run dist:win
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kripl-Studio-Windows
+          path: apps/desktop/release/**
+          if-no-files-found: error

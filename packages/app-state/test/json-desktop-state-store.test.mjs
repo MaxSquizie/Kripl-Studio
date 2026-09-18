@@ -111,12 +111,14 @@ test("forgetting the active recent workspace clears last-workspace UI state", as
       workspaceView: { type: "diff", path: "src/a.ts" },
       expandedDirectories: ["src"]
     });
+    await store.rememberSession(project, join(directory, "sessions", "active.jsonl"));
 
     await store.forgetRecentProject(project);
     const state = store.snapshot();
 
     assert.equal(state.lastWorkspacePath, undefined);
     assert.deepEqual(state.recentProjects, []);
+    assert.equal(state.lastSessionByWorkspace[resolve(project)], undefined);
     assert.deepEqual(state.ui, {
       workspaceView: { type: "agent" },
       expandedDirectories: []

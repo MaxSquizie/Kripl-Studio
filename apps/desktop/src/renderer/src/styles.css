@@ -1097,3 +1097,90 @@ button {
 .agent-session-card .agent-start-button:hover:not(:disabled) {
   background: #21483b;
 }
+
+
+.code-editor {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-height: calc(100vh - 190px);
+  margin: 0;
+  border: 0;
+  resize: none;
+  background: #0c1015;
+  padding: 16px 18px 40px;
+  color: #c7ced8;
+  outline: none;
+  tab-size: 2;
+  white-space: pre;
+  font: 12px/1.58 "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+}
+
+.code-editor:focus {
+  box-shadow: inset 0 0 0 1px rgba(82, 143, 122, 0.22);
+}
+
+.file-metadata {
+  align-items: center;
+}
+
+.file-metadata .secondary-button.compact,
+.file-metadata .danger-button.compact {
+  min-height: 26px;
+  padding: 4px 9px;
+  font-size: 9px;
+}
+
+.file-metadata > .secondary-button {
+  margin-left: auto;
+}
+
+.dirty-indicator {
+  color: #a8cbbb;
+}
+
+.diff-toolbar {
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.diff-metadata,
+.review-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.review-actions {
+  margin-left: auto;
+}
+
+.danger-button {
+  border: 1px solid #6d4147;
+  border-radius: 7px;
+  background: #241619;
+  padding: 7px 10px;
+  color: #d5a3a8;
+  cursor: pointer;
+  font: inherit;
+}
+
+.danger-button:hover:not(:disabled) {
+  border-color: #92535b;
+  background: #321d21;
+  color: #efbcc1;
+}
+
+.danger-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.editor-error {
+  border-bottom: 1px solid #552f35;
+  background: rgba(101, 46, 53, 0.18);
+  padding: 8px 14px;
+  color: #dba8ad;
+  font-size: 10px;
+  line-height: 1.45;
+}

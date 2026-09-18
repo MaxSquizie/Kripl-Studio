@@ -4,6 +4,7 @@ import type {
   AgentInput,
   AgentInteractionResponse,
   AgentRuntime,
+  AgentSessionSnapshot,
   AgentStartOptions,
   NetworkMode,
   PermissionPolicy,
@@ -21,6 +22,7 @@ import { writePiBrowserTools } from "./pi-browser-tools.js";
 import { writePiPermissionGate } from "./pi-permission-gate.js";
 import { writePiWebTools } from "./pi-web-tools.js";
 import { PiRpcProcess } from "./rpc-process.js";
+import { normalizePiSessionMessages } from "./pi-session-normalizer.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -43,6 +45,18 @@ function responseError(response: JsonRecord): string | undefined {
 function assertSuccess(response: JsonRecord): void {
   const error = responseError(response);
   if (error) throw new Error(error);
+}
+
+function responseData(response: JsonRecord): JsonRecord {
+  assertSuccess(response);
+  if (!response.data || typeof response.data !== "object" || Array.isArray(response.data)) {
+    throw new Error("Pi RPC response is missing data.");
+  }
+  return response.data as JsonRecord;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value ? value : undefined;
 }
 
 export class PiAgentRuntime implements AgentRuntime {
@@ -155,6 +169,35 @@ export class PiAgentRuntime implements AgentRuntime {
       ...(typeof response.value === "string" ? { value: response.value } : {}),
       ...(response.cancelled === true ? { cancelled: true } : {})
     });
+  }
+
+  async getSessionSnapshot(): Promise<AgentSessionSnapshot> {
+    const [stateResponse, messagesResponse] = await Promise.all([
+      this.rpc.send({ type: "get_state" }),
+      this.rpc.send({ type: "get_messages" })
+    ]);
+
+    const state = responseData(stateResponse);
+    const messagesData = responseData(messagesResponse);
+    const sessionId = optionalString(state.sessionId);
+    if (!sessionId) {
+      throw new Error("Pi session state is missing sessionId.");
+    }
+
+    const messageCount =
+      typeof state.messageCount === "number" && Number.isFinite(state.messageCount)
+        ? Math.max(0, Math.floor(state.messageCount))
+        : 0;
+    const sessionFile = optionalString(state.sessionFile);
+    const sessionName = optionalString(state.sessionName);
+
+    return {
+      ...(sessionFile ? { sessionFile } : {}),
+      sessionId,
+      ...(sessionName ? { sessionName } : {}),
+      messageCount,
+      messages: normalizePiSessionMessages(messagesData.messages)
+    };
   }
 
   subscribe(listener: AgentEventListener): Unsubscribe {

@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInteractionResponse, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
 import { contextBridge, ipcRenderer } from "electron";
 
 const IPC = {
@@ -17,7 +17,9 @@ const IPC = {
   workspaceChanges: "kripl:workspace-changes",
   workspaceDiff: "kripl:workspace-diff",
   probeLocalModels: "kripl:probe-local-models",
+  agentSessions: "kripl:agent-sessions",
   agentStart: "kripl:agent-start",
+  agentSessionSnapshot: "kripl:agent-session-snapshot",
   agentSend: "kripl:agent-send",
   agentAbort: "kripl:agent-abort",
   agentStop: "kripl:agent-stop",
@@ -104,8 +106,14 @@ const api = {
       error?: string;
     }>,
 
-  startAgent: (request: { endpoint: string; modelId: string }) =>
+  listAgentSessions: () =>
+    ipcRenderer.invoke(IPC.agentSessions) as Promise<AgentSessionSummary[]>,
+
+  startAgent: (request: { endpoint: string; modelId: string; sessionPath?: string }) =>
     ipcRenderer.invoke(IPC.agentStart, request) as Promise<ActionResult>,
+
+  getAgentSessionSnapshot: () =>
+    ipcRenderer.invoke(IPC.agentSessionSnapshot) as Promise<AgentSessionSnapshot | null>,
 
   sendAgentMessage: (message: string) =>
     ipcRenderer.invoke(IPC.agentSend, message) as Promise<ActionResult>,

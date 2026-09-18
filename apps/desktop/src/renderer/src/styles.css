@@ -1020,3 +1020,80 @@ button {
   white-space: nowrap;
   font-size: 9px;
 }
+
+
+.agent-session-card {
+  gap: 11px;
+  border-color: #294238;
+  background:
+    linear-gradient(180deg, rgba(48, 91, 75, 0.12), transparent 70%),
+    #101614;
+}
+
+.session-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.session-mode {
+  border: 1px solid #34463f;
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: #74877f;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.session-mode.resume {
+  border-color: #467766;
+  background: rgba(69, 122, 103, 0.13);
+  color: #9bc9b8;
+}
+
+.session-detail {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #263a32;
+  border-radius: 8px;
+  background: #0c1310;
+  padding: 9px 10px;
+}
+
+.session-detail strong,
+.session-detail span,
+.session-detail small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-detail strong {
+  color: #afc9c0;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.session-detail span {
+  color: #71877f;
+  font-size: 9px;
+}
+
+.session-detail small {
+  color: #53675f;
+  font: 8px/1.4 "Cascadia Code", Consolas, monospace;
+}
+
+.agent-session-card .agent-start-button {
+  border-color: #416e5e;
+  background: #19382e;
+  color: #d0e3dc;
+}
+
+.agent-session-card .agent-start-button:hover:not(:disabled) {
+  background: #21483b;
+}

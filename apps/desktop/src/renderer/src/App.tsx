@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInteractionRequest, AgentInteractionResponse, AgentStatus, BrowserState, ContextInspectorSnapshot, DesktopRuntimeSettings, DesktopUiState, RecentProject, WorkspaceChange, WorkspaceDescriptor, WorkspaceEntry } from "@kripl/core";
+import type { AgentEvent, AgentInteractionRequest, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, BrowserState, ContextInspectorSnapshot, DesktopRuntimeSettings, DesktopUiState, RecentProject, WorkspaceChange, WorkspaceDescriptor, WorkspaceEntry } from "@kripl/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import { WorkspaceContent, activeWorkspacePath, type WorkspaceView } from "./WorkspaceContent";
@@ -6,6 +6,7 @@ import { TerminalPanel } from "./TerminalPanel";
 import { RecentProjectsCard } from "./RecentProjectsCard";
 import { RuntimeSettingsCard } from "./RuntimeSettingsCard";
 import { ContextInspectorCard } from "./ContextInspectorCard";
+import { AgentSessionCard } from "./AgentSessionCard";
 
 interface AppInfo {
   name: string;
@@ -39,6 +40,7 @@ interface AgentBinding {
   workspacePath: string;
   endpoint: string;
   modelId: string;
+  sessionPath: string;
 }
 
 type ProbeState =
@@ -87,6 +89,8 @@ export function App() {
   const [endpoint, setEndpoint] = useState(DEFAULT_LOCAL_ENDPOINT);
   const [probe, setProbe] = useState<ProbeState>({ status: "idle", models: [] });
   const [selectedModel, setSelectedModel] = useState("");
+  const [agentSessions, setAgentSessions] = useState<AgentSessionSummary[]>([]);
+  const [selectedSessionPath, setSelectedSessionPath] = useState("");
   const [agentStatus, setAgentStatus] = useState<AgentStatus>("idle");
   const [agentError, setAgentError] = useState("");
   const [binding, setBinding] = useState<AgentBinding | null>(null);
@@ -119,6 +123,7 @@ export function App() {
         setRuntimeSettings(bootstrap.runtime);
         if (bootstrap.workspace) {
           await hydrateWorkspace(bootstrap.workspace, bootstrap.ui);
+          await refreshAgentSessions(bootstrap.lastSessionPath);
         }
       })
       .catch((error) => {
@@ -150,6 +155,9 @@ export function App() {
         }
         if (event.status === "error") {
           setAgentError(event.message ?? "Pi agent failed.");
+        }
+        if (event.status === "ready") {
+          void syncActiveSessionFromRuntime();
         }
         return;
       }
@@ -252,7 +260,8 @@ export function App() {
     Boolean(binding) &&
     binding?.workspacePath === workspace?.path &&
     binding?.endpoint === endpoint &&
-    binding?.modelId === selectedModel;
+    binding?.modelId === selectedModel &&
+    binding?.sessionPath === selectedSessionPath;
 
   const canStartAgent = Boolean(workspace && modelReady) && agentStatus !== "starting";
   const canSend = bindingMatchesSelection && agentStatus === "ready";
@@ -277,6 +286,68 @@ export function App() {
     setAgentStatus("stopped");
     setBinding(null);
     assistantMessageId.current = null;
+  }
+
+  function hydrateSessionSnapshot(snapshot: AgentSessionSnapshot) {
+    const restored: TranscriptMessage[] = snapshot.messages
+      .filter((message) => message.role !== "tool")
+      .map((message) => ({
+        id: crypto.randomUUID(),
+        role:
+          message.role === "user"
+            ? "user"
+            : message.role === "assistant"
+              ? "assistant"
+              : "system",
+        text: message.text
+      }));
+
+    setMessages(restored);
+    setThinking("");
+    assistantMessageId.current = null;
+  }
+
+  async function refreshAgentSessions(preferredPath?: string) {
+    const sessions = await window.kripl.listAgentSessions();
+    setAgentSessions(sessions);
+    setSelectedSessionPath((current) => {
+      const candidate = preferredPath ?? current;
+      return candidate && sessions.some((session) => session.path === candidate)
+        ? candidate
+        : "";
+    });
+  }
+
+  async function syncActiveSessionFromRuntime() {
+    try {
+      const [snapshot, sessions] = await Promise.all([
+        window.kripl.getAgentSessionSnapshot(),
+        window.kripl.listAgentSessions()
+      ]);
+      if (snapshot) {
+        hydrateSessionSnapshot(snapshot);
+        const persistedPath =
+          snapshot.sessionFile &&
+          sessions.some((session) => session.path === snapshot.sessionFile)
+            ? snapshot.sessionFile
+            : undefined;
+
+        if (persistedPath) {
+          setSelectedSessionPath(persistedPath);
+          setBinding((current) =>
+            current
+              ? {
+                  ...current,
+                  sessionPath: persistedPath
+                }
+              : current
+          );
+        }
+      }
+      setAgentSessions(sessions);
+    } catch {
+      // Session metadata refresh must not interrupt the live agent UI.
+    }
   }
 
   function persistedView(view: WorkspaceView): DesktopUiState["workspaceView"] {
@@ -339,6 +410,8 @@ export function App() {
     }
 
     setWorkspace(descriptor);
+    setAgentSessions([]);
+    setSelectedSessionPath("");
     setWorkspaceEntries(entries);
     setExpandedDirectories(expanded);
     setWorkspaceChanges(changes);
@@ -355,6 +428,7 @@ export function App() {
   async function syncRecentProjects() {
     const bootstrap = await window.kripl.getDesktopBootstrap();
     setRecentProjects(bootstrap.recentProjects);
+    await refreshAgentSessions(bootstrap.lastSessionPath);
   }
 
   async function openWorkspace() {
@@ -552,9 +626,11 @@ export function App() {
     setThinking("");
     assistantMessageId.current = null;
 
+    const requestedSessionPath = selectedSessionPath;
     const result = await window.kripl.startAgent({
       endpoint,
-      modelId: selectedModel
+      modelId: selectedModel,
+      ...(requestedSessionPath ? { sessionPath: requestedSessionPath } : {})
     });
 
     if (!result.ok) {
@@ -564,7 +640,18 @@ export function App() {
       return;
     }
 
-    setBinding({ workspacePath: workspace.path, endpoint, modelId: selectedModel });
+    const snapshot = await window.kripl.getAgentSessionSnapshot().catch(() => null);
+    if (snapshot) {
+      hydrateSessionSnapshot(snapshot);
+    }
+    await refreshAgentSessions(requestedSessionPath || undefined).catch(() => {});
+
+    setBinding({
+      workspacePath: workspace.path,
+      endpoint,
+      modelId: selectedModel,
+      sessionPath: requestedSessionPath
+    });
     setAgentStatus("ready");
   }
 
@@ -858,19 +945,17 @@ export function App() {
               </>
             )}
 
-            <button
-              className="agent-start-button"
-              type="button"
-              disabled={!canStartAgent}
-              onClick={() => void startAgent()}
-            >
-              {agentStatus === "starting"
-                ? "Starting Pi…"
-                : bindingMatchesSelection
-                  ? "Restart Pi agent"
-                  : "Start Pi agent"}
-            </button>
           </div>
+
+          <AgentSessionCard
+            sessions={agentSessions}
+            selectedPath={selectedSessionPath}
+            active={bindingMatchesSelection}
+            disabled={!canStartAgent}
+            starting={agentStatus === "starting"}
+            onSelect={setSelectedSessionPath}
+            onStart={() => void startAgent()}
+          />
 
           {runtimeSettings && (
             <RuntimeSettingsCard

@@ -26,6 +26,7 @@ export interface DesktopPersistenceState {
   version: 1;
   recentProjects: RecentProject[];
   lastWorkspacePath?: string;
+  lastSessionByWorkspace: Record<string, string>;
   ui: DesktopUiState;
   runtime: DesktopRuntimeSettings;
 }
@@ -33,6 +34,7 @@ export interface DesktopPersistenceState {
 export interface DesktopBootstrapState {
   workspace: WorkspaceDescriptor | null;
   recentProjects: RecentProject[];
+  lastSessionPath?: string;
   ui: DesktopUiState;
   runtime: DesktopRuntimeSettings;
 }

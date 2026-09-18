@@ -3,6 +3,7 @@ import type {
   AgentInteractionResponse,
   Unsubscribe
 } from "./events.js";
+import type { AgentSessionSnapshot } from "./agent-session.js";
 
 export interface AgentStartOptions {
   workspacePath: string;
@@ -22,6 +23,7 @@ export interface AgentRuntime {
   send(input: AgentInput): Promise<void>;
   stop(): Promise<void>;
   respondToInteraction(response: AgentInteractionResponse): Promise<void>;
+  getSessionSnapshot(): Promise<AgentSessionSnapshot>;
   dispose(): Promise<void>;
   subscribe(listener: AgentEventListener): Unsubscribe;
 }

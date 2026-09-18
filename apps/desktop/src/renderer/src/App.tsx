@@ -462,10 +462,21 @@ export function App() {
     await refreshAgentSessions(bootstrap.lastSessionPath);
   }
 
+  function confirmWorkspaceSwitch(): boolean {
+    if (dirtyEditorPaths.size === 0) return true;
+
+    const count = dirtyEditorPaths.size;
+    return window.confirm(
+      `You have ${count} unsaved editor buffer${count === 1 ? "" : "s"}. Switching projects will discard ${count === 1 ? "it" : "them"}.\n\nContinue?`
+    );
+  }
+
   async function openWorkspace() {
     try {
       const selected = await window.kripl.pickWorkspace();
       if (!selected) return;
+      if (selected.path !== workspace?.path && !confirmWorkspaceSwitch()) return;
+      if (selected.path === workspace?.path) return;
 
       await hydrateWorkspace(selected, {
         workspaceView: { type: "agent" },
@@ -479,6 +490,9 @@ export function App() {
   }
 
   async function openRecentProject(path: string) {
+    if (path === workspace?.path) return;
+    if (!confirmWorkspaceSwitch()) return;
+
     try {
       const selected = await window.kripl.openRecentProject(path);
       await hydrateWorkspace(selected, {

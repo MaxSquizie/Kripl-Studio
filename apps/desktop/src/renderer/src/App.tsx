@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInteractionRequest, AgentInteractionResponse, AgentStatus } from "@kripl/core";
+import type { AgentEvent, AgentInteractionRequest, AgentInteractionResponse, AgentStatus, BrowserState } from "@kripl/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 interface AppInfo {
@@ -43,6 +43,15 @@ type ProbeState =
 
 const DEFAULT_LOCAL_ENDPOINT = "http://127.0.0.1:1234/v1";
 
+const EMPTY_BROWSER_STATE: BrowserState = {
+  visible: false,
+  loading: false,
+  url: "",
+  title: "",
+  canGoBack: false,
+  canGoForward: false
+};
+
 function basename(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
   return parts.at(-1) ?? path;
@@ -73,10 +82,13 @@ export function App() {
   const [tools, setTools] = useState<ToolActivity[]>([]);
   const [thinking, setThinking] = useState("");
   const [interaction, setInteraction] = useState<AgentInteractionRequest | null>(null);
+  const [browserState, setBrowserState] = useState<BrowserState>(EMPTY_BROWSER_STATE);
   const assistantMessageId = useRef<string | null>(null);
 
   useEffect(() => {
     void window.kripl.getAppInfo().then(setAppInfo);
+    void window.kripl.getBrowserState().then(setBrowserState);
+    return window.kripl.onBrowserState(setBrowserState);
   }, []);
 
   useEffect(() => {
@@ -192,6 +204,12 @@ export function App() {
   const canStartAgent = Boolean(workspace && modelReady) && agentStatus !== "starting";
   const canSend = bindingMatchesSelection && agentStatus === "ready";
 
+
+  async function toggleBrowser() {
+    const next = await window.kripl.setBrowserVisible(!browserState.visible);
+    setBrowserState(next);
+  }
+
   async function disconnectAgent() {
     await window.kripl.stopAgent();
     setAgentStatus("stopped");
@@ -305,6 +323,14 @@ export function App() {
           <span>Kripl Studio</span>
         </div>
         <div className="workspace-title">{workspaceName}</div>
+        <button
+          className={`browser-toggle ${browserState.visible ? "active" : ""}`}
+          type="button"
+          onClick={() => void toggleBrowser()}
+          title={browserState.url || "Show interactive browser"}
+        >
+          {browserState.loading ? "Browser · loading" : browserState.visible ? "Browser · open" : "Browser"}
+        </button>
         <div className="runtime-pill">
           <span className="status-dot" />
           local model · network online
@@ -461,6 +487,12 @@ export function App() {
               <strong>{appInfo?.networkMode ?? "online"}</strong>
             </div>
             <div className="status-line">
+              <span>Browser</span>
+              <strong className={browserState.visible ? "" : "muted"}>
+                {browserState.visible ? (browserState.loading ? "loading" : "open") : "hidden"}
+              </strong>
+            </div>
+            <div className="status-line">
               <span>Cloud model fallback</span>
               <strong>off</strong>
             </div>
@@ -544,7 +576,20 @@ export function App() {
               <span>Network read/search</span>
               <strong>allow</strong>
             </div>
+            <div className="status-line">
+              <span>Browser click/type</span>
+              <strong className="muted">ask</strong>
+            </div>
           </div>
+
+          {browserState.url && (
+            <div className="status-card">
+              <span className="eyebrow">Browser</span>
+              <p className="detail">{browserState.title || "Untitled page"}</p>
+              <p className="detail browser-url">{browserState.url}</p>
+              {browserState.error && <p className="probe-result error">{browserState.error}</p>}
+            </div>
+          )}
 
           <div className="status-card">
             <span className="eyebrow">Desktop</span>
@@ -557,9 +602,9 @@ export function App() {
             <ol>
               <li>Replace placeholder Explorer with real workspace files.</li>
               <li>Add project-wide Changes/Diff review.</li>
-              <li>Add permission policy for shell, edits, and network.</li>
-              <li>Add browser/search network tools.</li>
-              <li>Add terminal and session persistence UI.</li>
+              <li>Add integrated terminal.</li>
+              <li>Add session persistence and recent projects UI.</li>
+              <li>Add permission/network profile settings.</li>
             </ol>
           </div>
         </aside>

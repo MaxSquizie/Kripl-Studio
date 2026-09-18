@@ -616,3 +616,84 @@ button {
   color: #a4adba;
   font-weight: 600;
 }
+
+
+.recent-projects-card {
+  gap: 9px;
+}
+
+.recent-projects-list {
+  display: grid;
+  gap: 5px;
+}
+
+.recent-project-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  border: 1px solid #26332f;
+  border-radius: 8px;
+  background: #0f1715;
+  overflow: hidden;
+}
+
+.recent-project-row.current {
+  border-color: #426f62;
+  background: #12201c;
+  box-shadow: inset 2px 0 0 #5c9c87;
+}
+
+.recent-project-open,
+.recent-project-forget {
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.recent-project-open {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  padding: 8px 9px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.recent-project-open:hover:not(:disabled) {
+  background: rgba(79, 138, 120, 0.12);
+}
+
+.recent-project-open:disabled {
+  cursor: default;
+}
+
+.recent-project-open strong,
+.recent-project-open span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-project-open strong {
+  color: #b9d8cf;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.recent-project-open span {
+  color: #6f827c;
+  font-size: 9px;
+}
+
+.recent-project-forget {
+  display: grid;
+  place-items: center;
+  border-left: 1px solid #26332f;
+  color: #70827c;
+  cursor: pointer;
+}
+
+.recent-project-forget:hover {
+  background: rgba(103, 163, 143, 0.12);
+  color: #9bc8b9;
+}

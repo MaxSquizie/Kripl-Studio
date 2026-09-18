@@ -472,11 +472,11 @@ export function App() {
   }
 
   async function openWorkspace() {
+    if (!confirmWorkspaceSwitch()) return;
+
     try {
       const selected = await window.kripl.pickWorkspace();
       if (!selected) return;
-      if (selected.path !== workspace?.path && !confirmWorkspaceSwitch()) return;
-      if (selected.path === workspace?.path) return;
 
       await hydrateWorkspace(selected, {
         workspaceView: { type: "agent" },

@@ -83,6 +83,9 @@ export function App() {
     return window.kripl.onAgentEvent((event: AgentEvent) => {
       if (event.type === "agent.status") {
         setAgentStatus(event.status);
+        if (event.status === "stopped" || event.status === "error") {
+          setInteraction(null);
+        }
         if (event.status === "error") {
           setAgentError(event.message ?? "Pi agent failed.");
         }
@@ -514,6 +517,30 @@ export function App() {
                   ? "Restart Pi agent"
                   : "Start Pi agent"}
             </button>
+          </div>
+
+          <div className="status-card">
+            <span className="eyebrow">Permissions</span>
+            <div className="status-line">
+              <span>Workspace read/write</span>
+              <strong>allow</strong>
+            </div>
+            <div className="status-line">
+              <span>Outside workspace</span>
+              <strong className="muted">ask</strong>
+            </div>
+            <div className="status-line">
+              <span>Sensitive files</span>
+              <strong className="muted">ask</strong>
+            </div>
+            <div className="status-line">
+              <span>Dangerous shell</span>
+              <strong className="muted">ask</strong>
+            </div>
+            <div className="status-line">
+              <span>Network read/search</span>
+              <strong>allow</strong>
+            </div>
           </div>
 
           <div className="status-card">

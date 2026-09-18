@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInteractionRequest, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, BrowserState, ContextInspectorSnapshot, DesktopRuntimeSettings, DesktopUiState, RecentProject, WorkspaceChange, WorkspaceDescriptor, WorkspaceEntry } from "@kripl/core";
+import type { AgentEvent, AgentInteractionRequest, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, BrowserState, ContextInspectorSnapshot, DesktopRuntimeSettings, DesktopUiState, RecentProject, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceEntry, WorkspaceGitStatus } from "@kripl/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import { WorkspaceContent, activeWorkspacePath, type WorkspaceView } from "./WorkspaceContent";
@@ -7,6 +7,7 @@ import { RecentProjectsCard } from "./RecentProjectsCard";
 import { RuntimeSettingsCard } from "./RuntimeSettingsCard";
 import { ContextInspectorCard } from "./ContextInspectorCard";
 import { AgentSessionCard } from "./AgentSessionCard";
+import { GitStatusCard } from "./GitStatusCard";
 
 interface AppInfo {
   name: string;
@@ -82,6 +83,7 @@ export function App() {
   const [workspaceEntries, setWorkspaceEntries] = useState<Record<string, WorkspaceEntry[]>>({});
   const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(new Set());
   const [workspaceChanges, setWorkspaceChanges] = useState<WorkspaceChange[]>([]);
+  const [gitStatus, setGitStatus] = useState<WorkspaceGitStatus | null>(null);
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>({ type: "agent" });
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [runtimeSettings, setRuntimeSettings] = useState<DesktopRuntimeSettings | null>(null);
@@ -228,7 +230,13 @@ export function App() {
 
       if (event.type === "agent.tool") {
         if (event.phase === "completed" || event.phase === "failed") {
-          void window.kripl.getWorkspaceChanges().then(setWorkspaceChanges).catch(() => {});
+          void Promise.all([
+            window.kripl.getWorkspaceChanges(),
+            window.kripl.getWorkspaceGitStatus()
+          ]).then(([changes, status]) => {
+            setWorkspaceChanges(changes);
+            setGitStatus(status);
+          }).catch(() => {});
         }
         setTools((current) => {
           const existing = current.findIndex((tool) => tool.callId === event.callId);
@@ -370,9 +378,12 @@ export function App() {
     descriptor: WorkspaceDescriptor,
     ui: DesktopUiState
   ) {
-    const [rootEntries, changes] = await Promise.all([
+    const [rootEntries, changes, nextGitStatus] = await Promise.all([
       window.kripl.listWorkspace(),
-      window.kripl.getWorkspaceChanges()
+      window.kripl.getWorkspaceChanges(),
+      descriptor.gitRepository
+        ? window.kripl.getWorkspaceGitStatus()
+        : Promise.resolve(null)
     ]);
 
     const entries: Record<string, WorkspaceEntry[]> = { "": rootEntries };
@@ -415,6 +426,7 @@ export function App() {
     setWorkspaceEntries(entries);
     setExpandedDirectories(expanded);
     setWorkspaceChanges(changes);
+    setGitStatus(nextGitStatus);
     setWorkspaceView(nextView);
     setBinding(null);
     setAgentStatus("idle");
@@ -473,9 +485,10 @@ export function App() {
   async function refreshWorkspace() {
     if (!workspace) return;
     try {
-      const [rootEntries, changes] = await Promise.all([
+      const [rootEntries, changes, nextGitStatus] = await Promise.all([
         window.kripl.listWorkspace(),
-        window.kripl.getWorkspaceChanges()
+        window.kripl.getWorkspaceChanges(),
+        window.kripl.getWorkspaceGitStatus()
       ]);
 
       const entries: Record<string, WorkspaceEntry[]> = { "": rootEntries };
@@ -493,6 +506,7 @@ export function App() {
 
       setWorkspaceEntries(entries);
       setWorkspaceChanges(changes);
+      setGitStatus(nextGitStatus);
 
       if (workspaceView.type === "file") {
         try {
@@ -569,16 +583,24 @@ export function App() {
 
   async function saveWorkspaceFile(path: string, content: string) {
     const file = await window.kripl.writeWorkspaceFile(path, content);
-    const changes = await window.kripl.getWorkspaceChanges();
+    const [changes, nextGitStatus] = await Promise.all([
+      window.kripl.getWorkspaceChanges(),
+      window.kripl.getWorkspaceGitStatus()
+    ]);
     setWorkspaceChanges(changes);
+    setGitStatus(nextGitStatus);
     const view: WorkspaceView = { type: "file", file };
     setWorkspaceView(view);
     persistWorkspaceUi(view);
   }
 
   async function refreshDiffAfterAction(path: string) {
-    const changes = await window.kripl.getWorkspaceChanges();
+    const [changes, nextGitStatus] = await Promise.all([
+      window.kripl.getWorkspaceChanges(),
+      window.kripl.getWorkspaceGitStatus()
+    ]);
     setWorkspaceChanges(changes);
+    setGitStatus(nextGitStatus);
     const stillChanged = changes.some((change) => change.path === path);
 
     if (stillChanged) {
@@ -615,6 +637,12 @@ export function App() {
     await window.kripl.revertWorkspaceChange(path);
     await refreshWorkspace();
     await refreshDiffAfterAction(path);
+  }
+
+  async function commitWorkspaceChanges(message: string): Promise<WorkspaceCommitResult> {
+    const result = await window.kripl.commitWorkspaceChanges(message);
+    await refreshWorkspace();
+    return result;
   }
 
   async function retrieveMemory(query: string) {
@@ -952,6 +980,12 @@ export function App() {
             </div>
           </div>
 
+          <GitStatusCard
+            status={gitStatus}
+            repository={Boolean(workspace?.gitRepository)}
+            onCommit={commitWorkspaceChanges}
+          />
+
           <ContextInspectorCard
             snapshot={contextSnapshot}
             onRetrieve={retrieveMemory}
@@ -1043,7 +1077,7 @@ export function App() {
           <div className="status-card">
             <span className="eyebrow">Next</span>
             <ol>
-              <li>Connect a real MemoryRuntime / AG Memory adapter.</li>
+              <li>Add local checkpoints/worktree experiments and richer editor ergonomics.</li>
             </ol>
           </div>
         </aside>

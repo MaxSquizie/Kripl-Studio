@@ -1,6 +1,7 @@
-import type { AgentEvent, AgentInteractionResponse, AgentStatus, BrowserState, DesktopBootstrapState, DesktopUiState, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, AgentStatus, BrowserState, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
 import { JsonDesktopStateStore } from "@kripl/app-state";
 import { LocalOpenAIProvider } from "@kripl/local-openai-provider";
+import { effectivePermissionPolicy, parsePermissionPolicy } from "@kripl/permissions";
 import { PiAgentRuntime } from "@kripl/pi-adapter";
 import { PtyTerminalRuntime } from "@kripl/terminal";
 import { LocalWorkspaceRuntime } from "@kripl/workspace";
@@ -20,6 +21,7 @@ const IPC = {
   openRecentProject: "kripl:open-recent-project",
   forgetRecentProject: "kripl:forget-recent-project",
   saveDesktopUi: "kripl:save-desktop-ui",
+  saveRuntimeSettings: "kripl:save-runtime-settings",
   workspaceList: "kripl:workspace-list",
   workspaceReadFile: "kripl:workspace-read-file",
   workspaceChanges: "kripl:workspace-changes",
@@ -99,6 +101,30 @@ function isDesktopUiState(value: unknown): value is DesktopUiState {
   if (view.type !== "agent" && view.type !== "file" && view.type !== "diff") return false;
   if ((view.type === "file" || view.type === "diff") && typeof view.path !== "string") return false;
   return record.expandedDirectories.every((item) => typeof item === "string");
+}
+
+function parseDesktopRuntimeSettings(value: unknown): DesktopRuntimeSettings {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Runtime settings must be an object.");
+  }
+
+  const record = value as Record<string, unknown>;
+  if (
+    record.networkMode !== "online" &&
+    record.networkMode !== "restricted" &&
+    record.networkMode !== "offline"
+  ) {
+    throw new Error("Invalid network mode.");
+  }
+  if (record.modelRouting !== "local-only") {
+    throw new Error("Only local model routing is currently supported.");
+  }
+
+  return {
+    networkMode: record.networkMode,
+    modelRouting: "local-only",
+    permissions: parsePermissionPolicy(record.permissions)
+  };
 }
 
 async function openWorkspacePath(
@@ -219,6 +245,7 @@ async function initializeBrowserRuntime(window: BrowserWindow): Promise<void> {
   }
 
   const runtime = new BrowserRuntime(window);
+  runtime.setNetworkMode(requireDesktopStateStore().snapshot().runtime.networkMode);
   const bridge = new ToolBridgeServer(runtime);
   await bridge.start();
 
@@ -258,13 +285,16 @@ function createWindow(): BrowserWindow {
 }
 
 function registerIpc(): void {
-  ipcMain.handle(IPC.appInfo, () => ({
-    name: app.getName(),
-    version: app.getVersion(),
-    platform: process.platform,
-    networkMode: "online",
-    modelRouting: "local-only"
-  }));
+  ipcMain.handle(IPC.appInfo, () => {
+    const runtime = requireDesktopStateStore().snapshot().runtime;
+    return {
+      name: app.getName(),
+      version: app.getVersion(),
+      platform: process.platform,
+      networkMode: runtime.networkMode,
+      modelRouting: runtime.modelRouting
+    };
+  });
 
   ipcMain.handle(IPC.desktopBootstrap, (): DesktopBootstrapState => {
     const store = requireDesktopStateStore();
@@ -272,7 +302,8 @@ function registerIpc(): void {
     return {
       workspace: workspaceRuntime.descriptor(),
       recentProjects: state.recentProjects,
-      ui: state.ui
+      ui: state.ui,
+      runtime: state.runtime
     };
   });
 
@@ -328,6 +359,19 @@ function registerIpc(): void {
     }
     await requireDesktopStateStore().setUiState(ui);
   });
+
+  ipcMain.handle(
+    IPC.saveRuntimeSettings,
+    async (_event, value: unknown): Promise<DesktopRuntimeSettings> => {
+      const runtime = parseDesktopRuntimeSettings(value);
+
+      await disposeActiveAgent();
+      await requireDesktopStateStore().setRuntimeSettings(runtime);
+      browserRuntime?.setNetworkMode(runtime.networkMode);
+
+      return requireDesktopStateStore().snapshot().runtime;
+    }
+  );
 
   ipcMain.handle(IPC.workspaceList, async (_event, path: unknown): Promise<WorkspaceEntry[]> => {
     if (path !== undefined && typeof path !== "string") {
@@ -398,6 +442,12 @@ function registerIpc(): void {
         throw new Error("Kripl browser tool bridge is not ready.");
       }
 
+      const runtimeSettings = requireDesktopStateStore().snapshot().runtime;
+      const permissionPolicy = effectivePermissionPolicy(
+        runtimeSettings.permissions,
+        runtimeSettings.networkMode
+      );
+
       const userData = app.getPath("userData");
       const agent = new PiAgentRuntime({
         agentDir: join(userData, "pi-agent"),
@@ -406,7 +456,8 @@ function registerIpc(): void {
           baseUrl: localModel.endpoint,
           modelId: localModel.modelId
         },
-        networkMode: "online",
+        networkMode: runtimeSettings.networkMode,
+        permissionPolicy,
         toolBridge
       });
 

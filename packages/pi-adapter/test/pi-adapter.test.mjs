@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import { createPiEnvironment } from "../dist/rpc-process.js";
+
 import { normalizePiEvent } from "../dist/pi-event-normalizer.js";
 import {
   KRIPL_PI_PROVIDER,
@@ -99,4 +101,44 @@ test("uses agent_settled as the ready boundary", () => {
   assert.deepEqual(normalizePiEvent({ type: "agent_settled" }), [
     { type: "agent.status", status: "ready" }
   ]);
+});
+
+
+test("Pi uses online network mode by default while keeping the selected model local", () => {
+  const previousOffline = process.env.PI_OFFLINE;
+  const previousOpenAI = process.env.OPENAI_API_KEY;
+  const previousGitHub = process.env.GITHUB_TOKEN;
+
+  process.env.PI_OFFLINE = "1";
+  process.env.OPENAI_API_KEY = "cloud-model-secret";
+  process.env.GITHUB_TOKEN = "tool-secret";
+
+  try {
+    const environment = createPiEnvironment({ agentDir: "C:/Kripl/pi-agent" });
+
+    assert.equal(environment.PI_OFFLINE, undefined);
+    assert.equal(environment.OPENAI_API_KEY, undefined);
+    assert.equal(environment.GITHUB_TOKEN, "tool-secret");
+    assert.equal(environment.PI_CODING_AGENT_DIR, "C:/Kripl/pi-agent");
+  } finally {
+    if (previousOffline === undefined) delete process.env.PI_OFFLINE;
+    else process.env.PI_OFFLINE = previousOffline;
+
+    if (previousOpenAI === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousOpenAI;
+
+    if (previousGitHub === undefined) delete process.env.GITHUB_TOKEN;
+    else process.env.GITHUB_TOKEN = previousGitHub;
+  }
+});
+
+test("explicit offline mode enables PI_OFFLINE without changing model routing", () => {
+  const environment = createPiEnvironment({
+    agentDir: "C:/Kripl/pi-agent",
+    networkMode: "offline"
+  });
+
+  assert.equal(environment.PI_OFFLINE, "1");
+  assert.equal(environment.PI_TELEMETRY, "0");
+  assert.equal(environment.PI_SKIP_VERSION_CHECK, "1");
 });

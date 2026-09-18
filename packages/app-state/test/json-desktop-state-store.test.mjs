@@ -21,6 +21,7 @@ test("corrupt state files fail closed to defaults", async () => {
     assert.equal(state.version, 1);
     assert.deepEqual(state.recentProjects, []);
     assert.equal(state.lastWorkspacePath, undefined);
+    assert.deepEqual(state.lastSessionByWorkspace, {});
     assert.deepEqual(state.ui, {
       workspaceView: { type: "agent" },
       expandedDirectories: []
@@ -179,6 +180,35 @@ test("malformed runtime settings fall back to safe defaults", () => {
   assert.equal(state.runtime.modelRouting, "local-only");
   assert.equal(state.runtime.permissions.rules["network.search"], "allow");
   assert.equal(state.runtime.permissions.rules["tool.unknown"], "ask");
+});
+
+test("last Pi session is remembered independently per workspace", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "kripl-state-"));
+  const file = join(directory, "desktop-state.json");
+  const workspaceA = join(directory, "workspace-a");
+  const workspaceB = join(directory, "workspace-b");
+  const sessionA = join(directory, "sessions", "a.jsonl");
+  const sessionB = join(directory, "sessions", "b.jsonl");
+  const store = new JsonDesktopStateStore(file);
+
+  try {
+    await store.rememberSession(workspaceA, sessionA);
+    await store.rememberSession(workspaceB, sessionB);
+
+    assert.equal(store.lastSessionFor(workspaceA), resolve(sessionA));
+    assert.equal(store.lastSessionFor(workspaceB), resolve(sessionB));
+
+    const reloaded = new JsonDesktopStateStore(file);
+    await reloaded.load();
+    assert.equal(reloaded.lastSessionFor(workspaceA), resolve(sessionA));
+    assert.equal(reloaded.lastSessionFor(workspaceB), resolve(sessionB));
+
+    await reloaded.forgetSession(workspaceA);
+    assert.equal(reloaded.lastSessionFor(workspaceA), undefined);
+    assert.equal(reloaded.lastSessionFor(workspaceB), resolve(sessionB));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("normalization limits recent projects and rejects malformed UI data", () => {

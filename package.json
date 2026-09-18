@@ -1,0 +1,19 @@
+{
+  "name": "kripl-studio",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @kripl/desktop",
+    "build": "npm run build --workspace @kripl/core && npm run build --workspace @kripl/pi-adapter && npm run build --workspace @kripl/desktop",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "dist:win": "npm run dist:win --workspace @kripl/desktop"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInteractionResponse } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, BrowserState } from "@kripl/core";
 import { contextBridge, ipcRenderer } from "electron";
 
 const IPC = {
@@ -10,7 +10,10 @@ const IPC = {
   agentAbort: "kripl:agent-abort",
   agentStop: "kripl:agent-stop",
   agentRespondInteraction: "kripl:agent-respond-interaction",
-  agentEvent: "kripl:agent-event"
+  agentEvent: "kripl:agent-event",
+  browserGetState: "kripl:browser-get-state",
+  browserSetVisible: "kripl:browser-set-visible",
+  browserState: "kripl:browser-state"
 } as const;
 
 interface ActionResult {
@@ -57,6 +60,17 @@ const api = {
 
   respondToAgentInteraction: (response: AgentInteractionResponse) =>
     ipcRenderer.invoke(IPC.agentRespondInteraction, response) as Promise<ActionResult>,
+
+  getBrowserState: () => ipcRenderer.invoke(IPC.browserGetState) as Promise<BrowserState>,
+
+  setBrowserVisible: (visible: boolean) =>
+    ipcRenderer.invoke(IPC.browserSetVisible, visible) as Promise<BrowserState>,
+
+  onBrowserState: (listener: (state: BrowserState) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: BrowserState) => listener(payload);
+    ipcRenderer.on(IPC.browserState, handler);
+    return () => ipcRenderer.removeListener(IPC.browserState, handler);
+  },
 
   onAgentEvent: (listener: (event: AgentEvent) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: AgentEvent) => listener(payload);

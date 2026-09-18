@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInteractionResponse } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, BrowserState } from "@kripl/core";
 
 export {};
 
@@ -40,6 +40,9 @@ declare global {
       abortAgent(): Promise<ActionResult>;
       stopAgent(): Promise<ActionResult>;
       respondToAgentInteraction(response: AgentInteractionResponse): Promise<ActionResult>;
+      getBrowserState(): Promise<BrowserState>;
+      setBrowserVisible(visible: boolean): Promise<BrowserState>;
+      onBrowserState(listener: (state: BrowserState) => void): () => void;
       onAgentEvent(listener: (event: AgentEvent) => void): () => void;
     };
   }

@@ -7,6 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { createPiEnvironment } from "../dist/rpc-process.js";
+import { writePiBrowserTools } from "../dist/pi-browser-tools.js";
 import { writePiPermissionGate } from "../dist/pi-permission-gate.js";
 import { writePiWebTools } from "../dist/pi-web-tools.js";
 
@@ -301,6 +302,122 @@ test("permission extension classifies Kripl web tools as network scopes", async 
     assert.match(extension, /"network\.search"/);
     assert.match(extension, /event\.toolName === "web_open"/);
     assert.match(extension, /"network\.read"/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+
+test("Pi environment only exposes browser bridge credentials when configured", () => {
+  const previousUrl = process.env.KRIPL_TOOL_BRIDGE_URL;
+  const previousToken = process.env.KRIPL_TOOL_BRIDGE_TOKEN;
+  process.env.KRIPL_TOOL_BRIDGE_URL = "http://127.0.0.1:9999";
+  process.env.KRIPL_TOOL_BRIDGE_TOKEN = "inherited-secret";
+
+  try {
+    const withoutBridge = createPiEnvironment({ agentDir: "C:/Kripl/pi-agent" });
+    assert.equal(withoutBridge.KRIPL_TOOL_BRIDGE_URL, undefined);
+    assert.equal(withoutBridge.KRIPL_TOOL_BRIDGE_TOKEN, undefined);
+
+    const withBridge = createPiEnvironment({
+      agentDir: "C:/Kripl/pi-agent",
+      toolBridge: {
+        baseUrl: "http://127.0.0.1:43170",
+        token: "bridge-secret"
+      }
+    });
+    assert.equal(withBridge.KRIPL_TOOL_BRIDGE_URL, "http://127.0.0.1:43170");
+    assert.equal(withBridge.KRIPL_TOOL_BRIDGE_TOKEN, "bridge-secret");
+  } finally {
+    if (previousUrl === undefined) delete process.env.KRIPL_TOOL_BRIDGE_URL;
+    else process.env.KRIPL_TOOL_BRIDGE_URL = previousUrl;
+    if (previousToken === undefined) delete process.env.KRIPL_TOOL_BRIDGE_TOKEN;
+    else process.env.KRIPL_TOOL_BRIDGE_TOKEN = previousToken;
+  }
+});
+
+test("generated browser extension loads and registers interactive browser tools", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "kripl-browser-tools-"));
+
+  try {
+    await writePiBrowserTools(directory);
+    const extensionPath = join(directory, "extensions", "kripl-browser-tools.ts");
+    const result = await loadPiExtensions([extensionPath], directory);
+
+    assert.deepEqual(result.errors, []);
+    const tools = result.extensions[0]?.tools;
+    assert.ok(tools);
+    for (const name of [
+      "browser_navigate",
+      "browser_snapshot",
+      "browser_click",
+      "browser_type",
+      "browser_back",
+      "browser_forward"
+    ]) {
+      assert.equal(tools.has(name), true, `missing browser tool: ${name}`);
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("browser tools reject offline mode before requiring the bridge", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "kripl-browser-offline-"));
+  const previousMode = process.env.KRIPL_NETWORK_MODE;
+  const previousUrl = process.env.KRIPL_TOOL_BRIDGE_URL;
+  const previousToken = process.env.KRIPL_TOOL_BRIDGE_TOKEN;
+
+  process.env.KRIPL_NETWORK_MODE = "offline";
+  delete process.env.KRIPL_TOOL_BRIDGE_URL;
+  delete process.env.KRIPL_TOOL_BRIDGE_TOKEN;
+
+  try {
+    await writePiBrowserTools(directory);
+    const result = await loadPiExtensions(
+      [join(directory, "extensions", "kripl-browser-tools.ts")],
+      directory
+    );
+    assert.deepEqual(result.errors, []);
+
+    const navigate = result.extensions[0]?.tools.get("browser_navigate");
+    assert.ok(navigate);
+    await assert.rejects(
+      () =>
+        navigate.definition.execute(
+          "browser-call-1",
+          { url: "https://example.com/" },
+          undefined,
+          undefined,
+          undefined
+        ),
+      /offline mode/
+    );
+  } finally {
+    if (previousMode === undefined) delete process.env.KRIPL_NETWORK_MODE;
+    else process.env.KRIPL_NETWORK_MODE = previousMode;
+    if (previousUrl === undefined) delete process.env.KRIPL_TOOL_BRIDGE_URL;
+    else process.env.KRIPL_TOOL_BRIDGE_URL = previousUrl;
+    if (previousToken === undefined) delete process.env.KRIPL_TOOL_BRIDGE_TOKEN;
+    else process.env.KRIPL_TOOL_BRIDGE_TOKEN = previousToken;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("permission extension requires approval for browser writes", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "kripl-browser-permissions-"));
+
+  try {
+    await writePiPermissionGate(directory);
+    const extension = await readFile(
+      join(directory, "extensions", "kripl-permissions.ts"),
+      "utf8"
+    );
+
+    assert.match(extension, /event\.toolName === "browser_snapshot"/);
+    assert.match(extension, /event\.toolName === "browser_click"/);
+    assert.match(extension, /event\.toolName === "browser_type"/);
+    assert.match(extension, /"network\.write"/);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

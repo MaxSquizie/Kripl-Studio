@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   DEFAULT_PERMISSION_POLICY,
   decidePermission,
+  effectivePermissionPolicy,
   parsePermissionPolicy,
   resolvePermissionEffect
 } from "../dist/index.js";
@@ -53,5 +54,54 @@ test("policy parser rejects invalid effects", () => {
   assert.throws(
     () => parsePermissionPolicy({ version: 1, rules: { "shell.safe": "sometimes" } }),
     /Invalid permission effect/
+  );
+});
+
+
+test("restricted mode promotes network allows to ask while preserving deny", () => {
+  const policy = {
+    version: 1,
+    rules: {
+      "network.search": "allow",
+      "network.read": "allow",
+      "network.write": "deny",
+      "network.auth": "ask",
+      "filesystem.read.workspace": "allow"
+    }
+  };
+
+  const effective = effectivePermissionPolicy(policy, "restricted");
+  assert.equal(effective.rules["network.search"], "ask");
+  assert.equal(effective.rules["network.read"], "ask");
+  assert.equal(effective.rules["network.write"], "deny");
+  assert.equal(effective.rules["network.auth"], "ask");
+  assert.equal(effective.rules["filesystem.read.workspace"], "allow");
+});
+
+test("offline mode denies every network scope without mutating the base policy", () => {
+  const base = {
+    version: 1,
+    rules: {
+      "network.search": "allow",
+      "network.read": "ask",
+      "network.write": "allow",
+      "network.auth": "deny"
+    }
+  };
+
+  const effective = effectivePermissionPolicy(base, "offline");
+  assert.equal(effective.rules["network.search"], "deny");
+  assert.equal(effective.rules["network.read"], "deny");
+  assert.equal(effective.rules["network.write"], "deny");
+  assert.equal(effective.rules["network.auth"], "deny");
+
+  assert.equal(base.rules["network.search"], "allow");
+  assert.equal(base.rules["network.read"], "ask");
+});
+
+test("policy parser rejects unknown scopes", () => {
+  assert.throws(
+    () => parsePermissionPolicy({ version: 1, rules: { "network.telepathy": "allow" } }),
+    /Unknown permission scope/
   );
 });

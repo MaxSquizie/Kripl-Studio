@@ -148,6 +148,20 @@ export class PiRpcProcess {
     });
   }
 
+  sendOneWay(message: JsonRecord): Promise<void> {
+    const child = this.child;
+    if (!child || !this.running) {
+      return Promise.reject(new Error("Pi RPC process is not running."));
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      child.stdin.write(`${JSON.stringify(message)}\n`, (error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+  }
+
   async dispose(): Promise<void> {
     const child = this.child;
     this.child = undefined;

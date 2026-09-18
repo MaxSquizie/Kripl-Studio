@@ -188,11 +188,13 @@ export class PiAgentRuntime implements AgentRuntime {
       typeof state.messageCount === "number" && Number.isFinite(state.messageCount)
         ? Math.max(0, Math.floor(state.messageCount))
         : 0;
+    const sessionFile = optionalString(state.sessionFile);
+    const sessionName = optionalString(state.sessionName);
 
     return {
-      ...(optionalString(state.sessionFile) ? { sessionFile: optionalString(state.sessionFile) } : {}),
+      ...(sessionFile ? { sessionFile } : {}),
       sessionId,
-      ...(optionalString(state.sessionName) ? { sessionName: optionalString(state.sessionName) } : {}),
+      ...(sessionName ? { sessionName } : {}),
       messageCount,
       messages: normalizePiSessionMessages(messagesData.messages)
     };

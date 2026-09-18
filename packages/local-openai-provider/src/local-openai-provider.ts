@@ -46,6 +46,7 @@ export class LocalOpenAIProvider implements ModelProvider {
     const response = await fetch(localModelsUrl(this.baseUrl), {
       method: "GET",
       headers: { accept: "application/json" },
+      redirect: "error",
       signal: AbortSignal.timeout(this.requestTimeoutMs)
     });
 

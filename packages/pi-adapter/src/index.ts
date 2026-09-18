@@ -1,3 +1,5 @@
+export * from "./pi-session-catalog.js";
+export * from "./pi-session-normalizer.js";
 export * from "./pi-browser-tools.js";
 export * from "./pi-agent-runtime.js";
 export * from "./pi-event-normalizer.js";

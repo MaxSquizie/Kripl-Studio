@@ -1,5 +1,7 @@
-import type { AgentEvent, AgentInteractionRequest, AgentInteractionResponse, AgentStatus, BrowserState } from "@kripl/core";
+import type { AgentEvent, AgentInteractionRequest, AgentInteractionResponse, AgentStatus, BrowserState, WorkspaceChange, WorkspaceDescriptor, WorkspaceEntry } from "@kripl/core";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { WorkspaceSidebar } from "./WorkspaceSidebar";
+import { WorkspaceContent, activeWorkspacePath, type WorkspaceView } from "./WorkspaceContent";
 
 interface AppInfo {
   name: string;
@@ -69,7 +71,11 @@ function payloadPreview(payload: unknown): string {
 }
 
 export function App() {
-  const [workspace, setWorkspace] = useState<string | null>(null);
+  const [workspace, setWorkspace] = useState<WorkspaceDescriptor | null>(null);
+  const [workspaceEntries, setWorkspaceEntries] = useState<Record<string, WorkspaceEntry[]>>({});
+  const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(new Set());
+  const [workspaceChanges, setWorkspaceChanges] = useState<WorkspaceChange[]>([]);
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>({ type: "agent" });
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [endpoint, setEndpoint] = useState(DEFAULT_LOCAL_ENDPOINT);
   const [probe, setProbe] = useState<ProbeState>({ status: "idle", models: [] });
@@ -169,6 +175,9 @@ export function App() {
       }
 
       if (event.type === "agent.tool") {
+        if (event.phase === "completed" || event.phase === "failed") {
+          void window.kripl.getWorkspaceChanges().then(setWorkspaceChanges).catch(() => {});
+        }
         setTools((current) => {
           const existing = current.findIndex((tool) => tool.callId === event.callId);
           const next: ToolActivity = {
@@ -186,7 +195,7 @@ export function App() {
   }, []);
 
   const workspaceName = useMemo(
-    () => (workspace ? basename(workspace) : "No project opened"),
+    () => workspace?.name ?? "No project opened",
     [workspace]
   );
 
@@ -197,7 +206,7 @@ export function App() {
 
   const bindingMatchesSelection =
     Boolean(binding) &&
-    binding?.workspacePath === workspace &&
+    binding?.workspacePath === workspace?.path &&
     binding?.endpoint === endpoint &&
     binding?.modelId === selectedModel;
 
@@ -218,16 +227,89 @@ export function App() {
   }
 
   async function openWorkspace() {
-    const selected = await window.kripl.pickWorkspace();
-    if (!selected) return;
+    try {
+      const selected = await window.kripl.pickWorkspace();
+      if (!selected) return;
 
-    if (binding) await disconnectAgent();
-    setWorkspace(selected);
-    setMessages([]);
-    setTools([]);
-    setThinking("");
-    setAgentError("");
-    setInteraction(null);
+      const [rootEntries, changes] = await Promise.all([
+        window.kripl.listWorkspace(),
+        window.kripl.getWorkspaceChanges()
+      ]);
+
+      setWorkspace(selected);
+      setWorkspaceEntries({ "": rootEntries });
+      setExpandedDirectories(new Set());
+      setWorkspaceChanges(changes);
+      setWorkspaceView({ type: "agent" });
+      setBinding(null);
+      setAgentStatus("stopped");
+      setMessages([]);
+      setTools([]);
+      setThinking("");
+      setAgentError("");
+      setInteraction(null);
+      assistantMessageId.current = null;
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function refreshWorkspace() {
+    if (!workspace) return;
+    try {
+      const [rootEntries, changes] = await Promise.all([
+        window.kripl.listWorkspace(),
+        window.kripl.getWorkspaceChanges()
+      ]);
+      setWorkspaceEntries({ "": rootEntries });
+      setExpandedDirectories(new Set());
+      setWorkspaceChanges(changes);
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function toggleDirectory(path: string) {
+    if (expandedDirectories.has(path)) {
+      setExpandedDirectories((current) => {
+        const next = new Set(current);
+        next.delete(path);
+        return next;
+      });
+      return;
+    }
+
+    try {
+      if (!workspaceEntries[path]) {
+        const entries = await window.kripl.listWorkspace(path);
+        setWorkspaceEntries((current) => ({ ...current, [path]: entries }));
+      }
+      setExpandedDirectories((current) => {
+        const next = new Set(current);
+        next.add(path);
+        return next;
+      });
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function openWorkspaceFile(path: string) {
+    try {
+      const file = await window.kripl.readWorkspaceFile(path);
+      setWorkspaceView({ type: "file", file });
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function openWorkspaceDiff(path: string) {
+    try {
+      const diff = await window.kripl.getWorkspaceDiff(path);
+      setWorkspaceView({ type: "diff", diff });
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : String(error));
+    }
   }
 
   async function probeModels() {
@@ -259,7 +341,6 @@ export function App() {
     assistantMessageId.current = null;
 
     const result = await window.kripl.startAgent({
-      workspacePath: workspace,
       endpoint,
       modelId: selectedModel
     });
@@ -271,7 +352,7 @@ export function App() {
       return;
     }
 
-    setBinding({ workspacePath: workspace, endpoint, modelId: selectedModel });
+    setBinding({ workspacePath: workspace.path, endpoint, modelId: selectedModel });
     setAgentStatus("ready");
   }
 
@@ -338,36 +419,23 @@ export function App() {
       </header>
 
       <div className="workspace">
-        <aside className="sidebar">
-          <div className="panel-heading">
-            <span>Explorer</span>
-            <button className="icon-button" type="button" onClick={openWorkspace} title="Open project">
-              +
-            </button>
-          </div>
-
-          {workspace ? (
-            <div className="project-card">
-              <strong>{workspaceName}</strong>
-              <span>{workspace}</span>
-              <div className="tree-placeholder">
-                <span>▸ .git</span>
-                <span>▸ src</span>
-                <span>▸ tests</span>
-                <span>  README.md</span>
-              </div>
-            </div>
-          ) : (
-            <div className="empty-panel">
-              <p>Open a project folder to create a local coding workspace.</p>
-              <button className="primary-button" type="button" onClick={openWorkspace}>
-                Open project
-              </button>
-            </div>
-          )}
-        </aside>
+        <WorkspaceSidebar
+          workspace={workspace}
+          entries={workspaceEntries}
+          expanded={expandedDirectories}
+          changes={workspaceChanges}
+          activePath={activeWorkspacePath(workspaceView)}
+          onOpenWorkspace={() => void openWorkspace()}
+          onRefresh={() => void refreshWorkspace()}
+          onToggleDirectory={(path) => void toggleDirectory(path)}
+          onOpenFile={(path) => void openWorkspaceFile(path)}
+          onOpenDiff={(path) => void openWorkspaceDiff(path)}
+        />
 
         <main className="agent-column">
+          {workspaceView.type === "agent" ? (
+            <>
+
           <div className="agent-header">
             <div>
               <span className="eyebrow">Agent workspace</span>
@@ -456,6 +524,14 @@ export function App() {
               </button>
             )}
           </div>
+
+            </>
+          ) : (
+            <WorkspaceContent
+              view={workspaceView}
+              onBackToAgent={() => setWorkspaceView({ type: "agent" })}
+            />
+          )}
         </main>
 
         <aside className="inspector">
@@ -600,8 +676,6 @@ export function App() {
           <div className="status-card">
             <span className="eyebrow">Next</span>
             <ol>
-              <li>Replace placeholder Explorer with real workspace files.</li>
-              <li>Add project-wide Changes/Diff review.</li>
               <li>Add integrated terminal.</li>
               <li>Add session persistence and recent projects UI.</li>
               <li>Add permission/network profile settings.</li>

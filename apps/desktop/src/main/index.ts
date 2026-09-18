@@ -1,9 +1,9 @@
-import type { AgentEvent, AgentInteractionResponse, AgentStatus, BrowserState } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, AgentStatus, BrowserState, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
 import { LocalOpenAIProvider } from "@kripl/local-openai-provider";
 import { PiAgentRuntime } from "@kripl/pi-adapter";
+import { LocalWorkspaceRuntime } from "@kripl/workspace";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
-import { stat } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserRuntime } from "./browser-runtime.js";
 import { ToolBridgeServer } from "./tool-bridge.js";
@@ -13,6 +13,10 @@ const currentDir = dirname(fileURLToPath(import.meta.url));
 const IPC = {
   appInfo: "kripl:app-info",
   pickWorkspace: "kripl:pick-workspace",
+  workspaceList: "kripl:workspace-list",
+  workspaceReadFile: "kripl:workspace-read-file",
+  workspaceChanges: "kripl:workspace-changes",
+  workspaceDiff: "kripl:workspace-diff",
   probeLocalModels: "kripl:probe-local-models",
   agentStart: "kripl:agent-start",
   agentSend: "kripl:agent-send",
@@ -26,7 +30,6 @@ const IPC = {
 } as const;
 
 interface AgentStartRequest {
-  workspacePath: string;
   endpoint: string;
   modelId: string;
 }
@@ -42,6 +45,7 @@ let activeAgentStatus: AgentStatus = "idle";
 let browserRuntime: BrowserRuntime | undefined;
 let toolBridgeServer: ToolBridgeServer | undefined;
 let browserUnsubscribe: (() => void) | undefined;
+const workspaceRuntime = new LocalWorkspaceRuntime();
 
 
 function emptyBrowserState(): BrowserState {
@@ -66,9 +70,6 @@ function isAgentStartRequest(value: unknown): value is AgentStartRequest {
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
   return (
-    typeof record.workspacePath === "string" &&
-    record.workspacePath.length > 0 &&
-    record.workspacePath.length <= 32_768 &&
     typeof record.endpoint === "string" &&
     record.endpoint.length > 0 &&
     record.endpoint.length <= 2_048 &&
@@ -76,15 +77,6 @@ function isAgentStartRequest(value: unknown): value is AgentStartRequest {
     record.modelId.length > 0 &&
     record.modelId.length <= 512
   );
-}
-
-async function validateWorkspace(path: string): Promise<string> {
-  const absolutePath = resolve(path);
-  const info = await stat(absolutePath);
-  if (!info.isDirectory()) {
-    throw new Error("Selected workspace is not a directory.");
-  }
-  return absolutePath;
 }
 
 async function validateLocalModel(endpoint: string, modelId: string) {
@@ -186,14 +178,49 @@ function registerIpc(): void {
     modelRouting: "local-only"
   }));
 
-  ipcMain.handle(IPC.pickWorkspace, async () => {
+  ipcMain.handle(IPC.pickWorkspace, async (): Promise<WorkspaceDescriptor | null> => {
     const result = await dialog.showOpenDialog({
       title: "Open project",
       properties: ["openDirectory"]
     });
 
     if (result.canceled || result.filePaths.length === 0) return null;
-    return result.filePaths[0] ?? null;
+    const selected = result.filePaths[0];
+    if (!selected) return null;
+
+    await disposeActiveAgent();
+    return workspaceRuntime.open(selected);
+  });
+
+  ipcMain.handle(IPC.workspaceList, async (_event, path: unknown): Promise<WorkspaceEntry[]> => {
+    if (path !== undefined && typeof path !== "string") {
+      throw new Error("Workspace directory path must be a string.");
+    }
+    if (typeof path === "string" && path.length > 32_768) {
+      throw new Error("Workspace directory path is too long.");
+    }
+    return workspaceRuntime.list(typeof path === "string" ? path : "");
+  });
+
+  ipcMain.handle(
+    IPC.workspaceReadFile,
+    async (_event, path: unknown): Promise<WorkspaceFilePreview> => {
+      if (typeof path !== "string" || !path || path.length > 32_768) {
+        throw new Error("Invalid workspace file path.");
+      }
+      return workspaceRuntime.readFile(path);
+    }
+  );
+
+  ipcMain.handle(IPC.workspaceChanges, async (): Promise<WorkspaceChange[]> => {
+    return workspaceRuntime.getChanges();
+  });
+
+  ipcMain.handle(IPC.workspaceDiff, async (_event, path: unknown): Promise<WorkspaceDiff> => {
+    if (typeof path !== "string" || !path || path.length > 32_768) {
+      throw new Error("Invalid workspace diff path.");
+    }
+    return workspaceRuntime.getDiff(path);
   });
 
   ipcMain.handle(IPC.probeLocalModels, async (_event, endpoint: unknown) => {
@@ -221,7 +248,10 @@ function registerIpc(): void {
     }
 
     try {
-      const workspacePath = await validateWorkspace(request.workspacePath);
+      const workspace = workspaceRuntime.descriptor();
+      if (!workspace) {
+        throw new Error("Open a workspace before starting the agent.");
+      }
       const localModel = await validateLocalModel(request.endpoint, request.modelId);
 
       await disposeActiveAgent();
@@ -249,7 +279,7 @@ function registerIpc(): void {
         forwardAgentEvent(event.sender, agentEvent);
       });
 
-      await agent.start({ workspacePath });
+      await agent.start({ workspacePath: workspace.path });
       return { ok: true };
     } catch (error) {
       await disposeActiveAgent();
@@ -359,6 +389,7 @@ app.on("before-quit", () => {
   browserRuntime = undefined;
   void toolBridgeServer?.dispose();
   toolBridgeServer = undefined;
+  void workspaceRuntime.dispose();
   void disposeActiveAgent();
 });
 

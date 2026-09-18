@@ -1,4 +1,4 @@
-import type { NetworkMode } from "@kripl/core";
+import type { NetworkMode, ToolBridgeConnection } from "@kripl/core";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,7 @@ export interface PiRpcStartOptions {
   agentDir: string;
   sessionDir?: string;
   networkMode?: NetworkMode;
+  toolBridge?: ToolBridgeConnection;
 }
 
 const rpcEntryPath = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent/rpc-entry"));
@@ -67,6 +68,14 @@ export function createPiEnvironment(options: PiRpcStartOptions): NodeJS.ProcessE
   environment.PI_SKIP_VERSION_CHECK = "1";
   environment.PI_CODING_AGENT_DIR = options.agentDir;
   environment.KRIPL_NETWORK_MODE = options.networkMode ?? "online";
+
+  if (options.toolBridge) {
+    environment.KRIPL_TOOL_BRIDGE_URL = options.toolBridge.baseUrl;
+    environment.KRIPL_TOOL_BRIDGE_TOKEN = options.toolBridge.token;
+  } else {
+    delete environment.KRIPL_TOOL_BRIDGE_URL;
+    delete environment.KRIPL_TOOL_BRIDGE_TOKEN;
+  }
 
   if (options.networkMode === "offline") {
     environment.PI_OFFLINE = "1";

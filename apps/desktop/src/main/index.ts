@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { LocalOpenAIProvider } from "@kripl/local-openai-provider";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -6,7 +7,8 @@ const currentDir = dirname(fileURLToPath(import.meta.url));
 
 const IPC = {
   appInfo: "kripl:app-info",
-  pickWorkspace: "kripl:pick-workspace"
+  pickWorkspace: "kripl:pick-workspace",
+  probeLocalModels: "kripl:probe-local-models"
 } as const;
 
 function createWindow(): BrowserWindow {
@@ -51,6 +53,25 @@ function registerIpc(): void {
 
     if (result.canceled || result.filePaths.length === 0) return null;
     return result.filePaths[0] ?? null;
+  });
+
+  ipcMain.handle(IPC.probeLocalModels, async (_event, endpoint: unknown) => {
+    if (typeof endpoint !== "string" || endpoint.length > 2048) {
+      return { ok: false, endpoint: "", models: [], error: "Invalid local model endpoint." };
+    }
+
+    try {
+      const provider = new LocalOpenAIProvider({ baseUrl: endpoint, requestTimeoutMs: 2_500 });
+      const models = await provider.listModels();
+      return { ok: true, endpoint: provider.baseUrl, models };
+    } catch (error) {
+      return {
+        ok: false,
+        endpoint,
+        models: [],
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
   });
 }
 

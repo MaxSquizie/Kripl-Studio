@@ -1,10 +1,12 @@
 import type {
+  NetworkMode,
   PermissionDecision,
   PermissionEffect,
   PermissionPolicy,
   PermissionRequest,
   PermissionScope
 } from "@kripl/core";
+import { PERMISSION_SCOPES } from "@kripl/core";
 
 export const DEFAULT_PERMISSION_POLICY: PermissionPolicy = {
   version: 1,
@@ -25,12 +27,47 @@ export const DEFAULT_PERMISSION_POLICY: PermissionPolicy = {
 };
 
 const VALID_EFFECTS = new Set<PermissionEffect>(["allow", "ask", "deny"]);
+const VALID_SCOPES = new Set<PermissionScope>(PERMISSION_SCOPES);
+const NETWORK_SCOPES: PermissionScope[] = [
+  "network.search",
+  "network.read",
+  "network.write",
+  "network.auth"
+];
+
+export function clonePermissionPolicy(policy: PermissionPolicy): PermissionPolicy {
+  return {
+    version: 1,
+    rules: { ...policy.rules }
+  };
+}
 
 export function resolvePermissionEffect(
   policy: PermissionPolicy,
   scope: PermissionScope
 ): PermissionEffect {
   return policy.rules[scope] ?? "ask";
+}
+
+export function effectivePermissionPolicy(
+  policy: PermissionPolicy,
+  networkMode: NetworkMode
+): PermissionPolicy {
+  const effective = clonePermissionPolicy(policy);
+
+  if (networkMode === "restricted") {
+    for (const scope of NETWORK_SCOPES) {
+      if (effective.rules[scope] !== "deny") {
+        effective.rules[scope] = "ask";
+      }
+    }
+  } else if (networkMode === "offline") {
+    for (const scope of NETWORK_SCOPES) {
+      effective.rules[scope] = "deny";
+    }
+  }
+
+  return effective;
 }
 
 export function decidePermission(
@@ -59,6 +96,9 @@ export function parsePermissionPolicy(value: unknown): PermissionPolicy {
 
   const rules: Partial<Record<PermissionScope, PermissionEffect>> = {};
   for (const [scope, effect] of Object.entries(record.rules as Record<string, unknown>)) {
+    if (!VALID_SCOPES.has(scope as PermissionScope)) {
+      throw new Error(`Unknown permission scope "${scope}".`);
+    }
     if (typeof effect !== "string" || !VALID_EFFECTS.has(effect as PermissionEffect)) {
       throw new Error(`Invalid permission effect for "${scope}".`);
     }

@@ -116,16 +116,19 @@ export function App() {
           return;
         }
 
-        let id = assistantMessageId.current;
-        if (!id) {
-          id = crypto.randomUUID();
-          assistantMessageId.current = id;
+        const existingId = assistantMessageId.current;
+        if (!existingId) {
+          const newId = crypto.randomUUID();
+          assistantMessageId.current = newId;
           const initialText = event.phase === "delta" ? event.delta : event.content;
-          setMessages((current) => [...current, { id, role: "assistant", text: initialText }]);
+          setMessages((current) => [
+            ...current,
+            { id: newId, role: "assistant", text: initialText }
+          ]);
           return;
         }
 
-        const targetId = id;
+        const targetId = existingId;
         setMessages((current) =>
           current.map((message) => {
             if (message.id !== targetId) return message;

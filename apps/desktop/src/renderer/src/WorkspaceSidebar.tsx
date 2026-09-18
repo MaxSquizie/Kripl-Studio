@@ -9,7 +9,7 @@ interface WorkspaceSidebarProps {
   entries: Record<string, WorkspaceEntry[]>;
   expanded: Set<string>;
   changes: WorkspaceChange[];
-  activePath?: string;
+  activePath: string | undefined;
   onOpenWorkspace(): void;
   onRefresh(): void;
   onToggleDirectory(path: string): void;
@@ -39,7 +39,7 @@ function TreeLevel({
   depth: number;
   entries: Record<string, WorkspaceEntry[]>;
   expanded: Set<string>;
-  activePath?: string;
+  activePath: string | undefined;
   onToggleDirectory(path: string): void;
   onOpenFile(path: string): void;
 }) {

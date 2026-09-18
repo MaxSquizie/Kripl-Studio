@@ -1,9 +1,11 @@
-import type { AgentEvent, AgentInteractionResponse, AgentStatus, BrowserState, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, AgentStatus, BrowserState, DesktopBootstrapState, DesktopUiState, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
+import { JsonDesktopStateStore } from "@kripl/app-state";
 import { LocalOpenAIProvider } from "@kripl/local-openai-provider";
 import { PiAgentRuntime } from "@kripl/pi-adapter";
 import { PtyTerminalRuntime } from "@kripl/terminal";
 import { LocalWorkspaceRuntime } from "@kripl/workspace";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserRuntime } from "./browser-runtime.js";
@@ -14,6 +16,10 @@ const currentDir = dirname(fileURLToPath(import.meta.url));
 const IPC = {
   appInfo: "kripl:app-info",
   pickWorkspace: "kripl:pick-workspace",
+  desktopBootstrap: "kripl:desktop-bootstrap",
+  openRecentProject: "kripl:open-recent-project",
+  forgetRecentProject: "kripl:forget-recent-project",
+  saveDesktopUi: "kripl:save-desktop-ui",
   workspaceList: "kripl:workspace-list",
   workspaceReadFile: "kripl:workspace-read-file",
   workspaceChanges: "kripl:workspace-changes",
@@ -56,6 +62,7 @@ let browserUnsubscribe: (() => void) | undefined;
 let terminalUnsubscribe: (() => void) | undefined;
 const workspaceRuntime = new LocalWorkspaceRuntime();
 const terminalRuntime = new PtyTerminalRuntime();
+let desktopStateStore: JsonDesktopStateStore | undefined;
 
 
 function emptyBrowserState(): BrowserState {
@@ -74,6 +81,66 @@ function actionError(error: unknown): ActionResult {
     ok: false,
     error: error instanceof Error ? error.message : String(error)
   };
+}
+
+function requireDesktopStateStore(): JsonDesktopStateStore {
+  if (!desktopStateStore) throw new Error("Desktop state store is not initialized.");
+  return desktopStateStore;
+}
+
+function isDesktopUiState(value: unknown): value is DesktopUiState {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  if (!record.workspaceView || typeof record.workspaceView !== "object" || Array.isArray(record.workspaceView)) {
+    return false;
+  }
+  if (!Array.isArray(record.expandedDirectories)) return false;
+  const view = record.workspaceView as Record<string, unknown>;
+  if (view.type !== "agent" && view.type !== "file" && view.type !== "diff") return false;
+  if ((view.type === "file" || view.type === "diff") && typeof view.path !== "string") return false;
+  return record.expandedDirectories.every((item) => typeof item === "string");
+}
+
+async function openWorkspacePath(
+  path: string,
+  options: { resetUi: boolean; remember: boolean }
+): Promise<WorkspaceDescriptor> {
+  const info = await stat(path);
+  if (!info.isDirectory()) {
+    throw new Error("Workspace path is not a directory.");
+  }
+
+  await Promise.all([
+    disposeActiveAgent(),
+    terminalRuntime.kill()
+  ]);
+
+  const descriptor = await workspaceRuntime.open(path);
+  const store = requireDesktopStateStore();
+
+  if (options.remember) {
+    await store.rememberWorkspace(descriptor);
+  }
+  if (options.resetUi) {
+    await store.setUiState({
+      workspaceView: { type: "agent" },
+      expandedDirectories: []
+    });
+  }
+
+  return descriptor;
+}
+
+async function restoreLastWorkspace(): Promise<void> {
+  const store = requireDesktopStateStore();
+  const state = await store.load();
+  if (!state.lastWorkspacePath) return;
+
+  try {
+    await workspaceRuntime.open(state.lastWorkspacePath);
+  } catch {
+    await store.clearLastWorkspace();
+  }
 }
 
 function isAgentStartRequest(value: unknown): value is AgentStartRequest {
@@ -199,6 +266,16 @@ function registerIpc(): void {
     modelRouting: "local-only"
   }));
 
+  ipcMain.handle(IPC.desktopBootstrap, (): DesktopBootstrapState => {
+    const store = requireDesktopStateStore();
+    const state = store.snapshot();
+    return {
+      workspace: workspaceRuntime.descriptor(),
+      recentProjects: state.recentProjects,
+      ui: state.ui
+    };
+  });
+
   ipcMain.handle(IPC.pickWorkspace, async (): Promise<WorkspaceDescriptor | null> => {
     const result = await dialog.showOpenDialog({
       title: "Open project",
@@ -209,11 +286,47 @@ function registerIpc(): void {
     const selected = result.filePaths[0];
     if (!selected) return null;
 
-    await Promise.all([
-      disposeActiveAgent(),
-      terminalRuntime.kill()
-    ]);
-    return workspaceRuntime.open(selected);
+    return openWorkspacePath(selected, { resetUi: true, remember: true });
+  });
+
+  ipcMain.handle(
+    IPC.openRecentProject,
+    async (_event, path: unknown): Promise<WorkspaceDescriptor> => {
+      if (typeof path !== "string" || !path || path.length > 32_768) {
+        throw new Error("Invalid recent project path.");
+      }
+
+      const store = requireDesktopStateStore();
+      if (!store.hasRecentProject(path)) {
+        throw new Error("Project is not present in Kripl Studio recent projects.");
+      }
+
+      return openWorkspacePath(path, { resetUi: true, remember: true });
+    }
+  );
+
+  ipcMain.handle(
+    IPC.forgetRecentProject,
+    async (_event, path: unknown): Promise<RecentProject[]> => {
+      if (typeof path !== "string" || !path || path.length > 32_768) {
+        throw new Error("Invalid recent project path.");
+      }
+
+      const store = requireDesktopStateStore();
+      if (!store.hasRecentProject(path)) {
+        return store.snapshot().recentProjects;
+      }
+
+      await store.forgetRecentProject(path);
+      return store.snapshot().recentProjects;
+    }
+  );
+
+  ipcMain.handle(IPC.saveDesktopUi, async (_event, ui: unknown): Promise<void> => {
+    if (!isDesktopUiState(ui)) {
+      throw new Error("Invalid desktop UI state.");
+    }
+    await requireDesktopStateStore().setUiState(ui);
   });
 
   ipcMain.handle(IPC.workspaceList, async (_event, path: unknown): Promise<WorkspaceEntry[]> => {
@@ -468,6 +581,11 @@ function registerIpc(): void {
 }
 
 void app.whenReady().then(async () => {
+  desktopStateStore = new JsonDesktopStateStore(
+    join(app.getPath("userData"), "desktop-state.json")
+  );
+  await restoreLastWorkspace();
+
   registerIpc();
   const window = createWindow();
   await initializeBrowserRuntime(window);

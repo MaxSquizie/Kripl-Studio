@@ -1,8 +1,9 @@
-import type { AgentEvent, AgentInteractionRequest, AgentInteractionResponse, AgentStatus, BrowserState, WorkspaceChange, WorkspaceDescriptor, WorkspaceEntry } from "@kripl/core";
+import type { AgentEvent, AgentInteractionRequest, AgentInteractionResponse, AgentStatus, BrowserState, DesktopUiState, RecentProject, WorkspaceChange, WorkspaceDescriptor, WorkspaceEntry } from "@kripl/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import { WorkspaceContent, activeWorkspacePath, type WorkspaceView } from "./WorkspaceContent";
 import { TerminalPanel } from "./TerminalPanel";
+import { RecentProjectsCard } from "./RecentProjectsCard";
 
 interface AppInfo {
   name: string;
@@ -73,6 +74,7 @@ function payloadPreview(payload: unknown): string {
 
 export function App() {
   const [workspace, setWorkspace] = useState<WorkspaceDescriptor | null>(null);
+  const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [workspaceEntries, setWorkspaceEntries] = useState<Record<string, WorkspaceEntry[]>>({});
   const [expandedDirectories, setExpandedDirectories] = useState<Set<string>>(new Set());
   const [workspaceChanges, setWorkspaceChanges] = useState<WorkspaceChange[]>([]);
@@ -94,9 +96,37 @@ export function App() {
   const assistantMessageId = useRef<string | null>(null);
 
   useEffect(() => {
-    void window.kripl.getAppInfo().then(setAppInfo);
-    void window.kripl.getBrowserState().then(setBrowserState);
-    return window.kripl.onBrowserState(setBrowserState);
+    let disposed = false;
+
+    void window.kripl.getAppInfo().then((info) => {
+      if (!disposed) setAppInfo(info);
+    });
+    void window.kripl.getBrowserState().then((state) => {
+      if (!disposed) setBrowserState(state);
+    });
+
+    void window.kripl.getDesktopBootstrap()
+      .then(async (bootstrap) => {
+        if (disposed) return;
+        setRecentProjects(bootstrap.recentProjects);
+        if (bootstrap.workspace) {
+          await hydrateWorkspace(bootstrap.workspace, bootstrap.ui);
+        }
+      })
+      .catch((error) => {
+        if (!disposed) {
+          setAgentError(error instanceof Error ? error.message : String(error));
+        }
+      });
+
+    const unsubscribeBrowser = window.kripl.onBrowserState((state) => {
+      if (!disposed) setBrowserState(state);
+    });
+
+    return () => {
+      disposed = true;
+      unsubscribeBrowser();
+    };
   }, []);
 
   useEffect(() => {
@@ -232,29 +262,118 @@ export function App() {
     assistantMessageId.current = null;
   }
 
+  function persistedView(view: WorkspaceView): DesktopUiState["workspaceView"] {
+    if (view.type === "file") return { type: "file", path: view.file.path };
+    if (view.type === "diff") return { type: "diff", path: view.diff.path };
+    return { type: "agent" };
+  }
+
+  function persistWorkspaceUi(
+    view: WorkspaceView = workspaceView,
+    expanded: Set<string> = expandedDirectories
+  ) {
+    void window.kripl.saveDesktopUi({
+      workspaceView: persistedView(view),
+      expandedDirectories: [...expanded]
+    }).catch(() => {});
+  }
+
+  async function hydrateWorkspace(
+    descriptor: WorkspaceDescriptor,
+    ui: DesktopUiState
+  ) {
+    const [rootEntries, changes] = await Promise.all([
+      window.kripl.listWorkspace(),
+      window.kripl.getWorkspaceChanges()
+    ]);
+
+    const entries: Record<string, WorkspaceEntry[]> = { "": rootEntries };
+    const expanded = new Set<string>();
+    const orderedPaths = [...ui.expandedDirectories]
+      .sort((left, right) => left.split("/").length - right.split("/").length)
+      .slice(0, 64);
+
+    for (const path of orderedPaths) {
+      try {
+        entries[path] = await window.kripl.listWorkspace(path);
+        expanded.add(path);
+      } catch {
+        // Stale/deleted directories are simply omitted from restored UI state.
+      }
+    }
+
+    let nextView: WorkspaceView = { type: "agent" };
+    const savedView = ui.workspaceView;
+
+    if (savedView.type === "file" && savedView.path) {
+      try {
+        const file = await window.kripl.readWorkspaceFile(savedView.path);
+        nextView = { type: "file", file };
+      } catch {
+        nextView = { type: "agent" };
+      }
+    } else if (savedView.type === "diff" && savedView.path) {
+      try {
+        const diff = await window.kripl.getWorkspaceDiff(savedView.path);
+        nextView = { type: "diff", diff };
+      } catch {
+        nextView = { type: "agent" };
+      }
+    }
+
+    setWorkspace(descriptor);
+    setWorkspaceEntries(entries);
+    setExpandedDirectories(expanded);
+    setWorkspaceChanges(changes);
+    setWorkspaceView(nextView);
+    setBinding(null);
+    setAgentStatus("idle");
+    setMessages([]);
+    setTools([]);
+    setThinking("");
+    setInteraction(null);
+    assistantMessageId.current = null;
+  }
+
+  async function syncRecentProjects() {
+    const bootstrap = await window.kripl.getDesktopBootstrap();
+    setRecentProjects(bootstrap.recentProjects);
+  }
+
   async function openWorkspace() {
     try {
       const selected = await window.kripl.pickWorkspace();
       if (!selected) return;
 
-      const [rootEntries, changes] = await Promise.all([
-        window.kripl.listWorkspace(),
-        window.kripl.getWorkspaceChanges()
-      ]);
-
-      setWorkspace(selected);
-      setWorkspaceEntries({ "": rootEntries });
-      setExpandedDirectories(new Set());
-      setWorkspaceChanges(changes);
-      setWorkspaceView({ type: "agent" });
-      setBinding(null);
-      setAgentStatus("stopped");
-      setMessages([]);
-      setTools([]);
-      setThinking("");
+      await hydrateWorkspace(selected, {
+        workspaceView: { type: "agent" },
+        expandedDirectories: []
+      });
+      await syncRecentProjects();
       setAgentError("");
-      setInteraction(null);
-      assistantMessageId.current = null;
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function openRecentProject(path: string) {
+    try {
+      const selected = await window.kripl.openRecentProject(path);
+      await hydrateWorkspace(selected, {
+        workspaceView: { type: "agent" },
+        expandedDirectories: []
+      });
+      await syncRecentProjects();
+      setAgentError("");
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function forgetRecentProject(path: string) {
+    try {
+      const projects = await window.kripl.forgetRecentProject(path);
+      setRecentProjects(projects);
     } catch (error) {
       setAgentError(error instanceof Error ? error.message : String(error));
     }
@@ -267,9 +386,42 @@ export function App() {
         window.kripl.listWorkspace(),
         window.kripl.getWorkspaceChanges()
       ]);
-      setWorkspaceEntries({ "": rootEntries });
-      setExpandedDirectories(new Set());
+
+      const entries: Record<string, WorkspaceEntry[]> = { "": rootEntries };
+      const orderedPaths = [...expandedDirectories]
+        .sort((left, right) => left.split("/").length - right.split("/").length)
+        .slice(0, 64);
+
+      for (const path of orderedPaths) {
+        try {
+          entries[path] = await window.kripl.listWorkspace(path);
+        } catch {
+          // Ignore stale directories during refresh.
+        }
+      }
+
+      setWorkspaceEntries(entries);
       setWorkspaceChanges(changes);
+
+      if (workspaceView.type === "file") {
+        try {
+          const file = await window.kripl.readWorkspaceFile(workspaceView.file.path);
+          setWorkspaceView({ type: "file", file });
+        } catch {
+          const view: WorkspaceView = { type: "agent" };
+          setWorkspaceView(view);
+          persistWorkspaceUi(view);
+        }
+      } else if (workspaceView.type === "diff") {
+        try {
+          const diff = await window.kripl.getWorkspaceDiff(workspaceView.diff.path);
+          setWorkspaceView({ type: "diff", diff });
+        } catch {
+          const view: WorkspaceView = { type: "agent" };
+          setWorkspaceView(view);
+          persistWorkspaceUi(view);
+        }
+      }
     } catch (error) {
       setAgentError(error instanceof Error ? error.message : String(error));
     }
@@ -280,6 +432,7 @@ export function App() {
       setExpandedDirectories((current) => {
         const next = new Set(current);
         next.delete(path);
+        persistWorkspaceUi(workspaceView, next);
         return next;
       });
       return;
@@ -293,6 +446,7 @@ export function App() {
       setExpandedDirectories((current) => {
         const next = new Set(current);
         next.add(path);
+        persistWorkspaceUi(workspaceView, next);
         return next;
       });
     } catch (error) {
@@ -303,7 +457,9 @@ export function App() {
   async function openWorkspaceFile(path: string) {
     try {
       const file = await window.kripl.readWorkspaceFile(path);
-      setWorkspaceView({ type: "file", file });
+      const view: WorkspaceView = { type: "file", file };
+      setWorkspaceView(view);
+      persistWorkspaceUi(view);
     } catch (error) {
       setAgentError(error instanceof Error ? error.message : String(error));
     }
@@ -312,7 +468,9 @@ export function App() {
   async function openWorkspaceDiff(path: string) {
     try {
       const diff = await window.kripl.getWorkspaceDiff(path);
-      setWorkspaceView({ type: "diff", diff });
+      const view: WorkspaceView = { type: "diff", diff };
+      setWorkspaceView(view);
+      persistWorkspaceUi(view);
     } catch (error) {
       setAgentError(error instanceof Error ? error.message : String(error));
     }
@@ -543,7 +701,11 @@ export function App() {
           ) : (
             <WorkspaceContent
               view={workspaceView}
-              onBackToAgent={() => setWorkspaceView({ type: "agent" })}
+              onBackToAgent={() => {
+                const view: WorkspaceView = { type: "agent" };
+                setWorkspaceView(view);
+                persistWorkspaceUi(view);
+              }}
             />
           )}
         </main>
@@ -681,6 +843,13 @@ export function App() {
             </div>
           )}
 
+          <RecentProjectsCard
+            projects={recentProjects}
+            currentPath={workspace?.path}
+            onOpen={(path) => void openRecentProject(path)}
+            onForget={(path) => void forgetRecentProject(path)}
+          />
+
           <div className="status-card">
             <span className="eyebrow">Desktop</span>
             <p className="detail">{appInfo ? `${appInfo.name} ${appInfo.version}` : "Loading…"}</p>
@@ -690,7 +859,6 @@ export function App() {
           <div className="status-card">
             <span className="eyebrow">Next</span>
             <ol>
-              <li>Add session persistence and recent projects UI.</li>
               <li>Add permission/network profile settings.</li>
             </ol>
           </div>

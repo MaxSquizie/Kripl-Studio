@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInteractionResponse, BrowserState, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, BrowserState, DesktopBootstrapState, DesktopUiState, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
 
 export {};
 
@@ -17,7 +17,11 @@ declare global {
         networkMode: "online" | "restricted" | "offline";
         modelRouting: "local-only" | "allow-remote";
       }>;
+      getDesktopBootstrap(): Promise<DesktopBootstrapState>;
       pickWorkspace(): Promise<WorkspaceDescriptor | null>;
+      openRecentProject(path: string): Promise<WorkspaceDescriptor>;
+      forgetRecentProject(path: string): Promise<RecentProject[]>;
+      saveDesktopUi(ui: DesktopUiState): Promise<void>;
       listWorkspace(path?: string): Promise<WorkspaceEntry[]>;
       readWorkspaceFile(path: string): Promise<WorkspaceFilePreview>;
       getWorkspaceChanges(): Promise<WorkspaceChange[]>;

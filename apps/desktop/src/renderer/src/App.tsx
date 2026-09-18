@@ -324,7 +324,26 @@ export function App() {
         window.kripl.getAgentSessionSnapshot(),
         window.kripl.listAgentSessions()
       ]);
-      if (snapshot) hydrateSessionSnapshot(snapshot);
+      if (snapshot) {
+        hydrateSessionSnapshot(snapshot);
+        const persistedPath =
+          snapshot.sessionFile &&
+          sessions.some((session) => session.path === snapshot.sessionFile)
+            ? snapshot.sessionFile
+            : undefined;
+
+        if (persistedPath) {
+          setSelectedSessionPath(persistedPath);
+          setBinding((current) =>
+            current
+              ? {
+                  ...current,
+                  sessionPath: persistedPath
+                }
+              : current
+          );
+        }
+      }
       setAgentSessions(sessions);
     } catch {
       // Session metadata refresh must not interrupt the live agent UI.

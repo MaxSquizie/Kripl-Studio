@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInteractionResponse, BrowserState, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, BrowserState, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
 import { contextBridge, ipcRenderer } from "electron";
 
 const IPC = {
@@ -17,7 +17,14 @@ const IPC = {
   agentEvent: "kripl:agent-event",
   browserGetState: "kripl:browser-get-state",
   browserSetVisible: "kripl:browser-set-visible",
-  browserState: "kripl:browser-state"
+  browserState: "kripl:browser-state",
+  terminalGetState: "kripl:terminal-get-state",
+  terminalStart: "kripl:terminal-start",
+  terminalWrite: "kripl:terminal-write",
+  terminalResize: "kripl:terminal-resize",
+  terminalKill: "kripl:terminal-kill",
+  terminalPanelVisible: "kripl:terminal-panel-visible",
+  terminalEvent: "kripl:terminal-event"
 } as const;
 
 interface ActionResult {
@@ -84,6 +91,29 @@ const api = {
     const handler = (_event: Electron.IpcRendererEvent, payload: BrowserState) => listener(payload);
     ipcRenderer.on(IPC.browserState, handler);
     return () => ipcRenderer.removeListener(IPC.browserState, handler);
+  },
+
+  getTerminalState: () =>
+    ipcRenderer.invoke(IPC.terminalGetState) as Promise<TerminalSessionInfo | null>,
+
+  startTerminal: (size?: { cols?: number; rows?: number }) =>
+    ipcRenderer.invoke(IPC.terminalStart, size) as Promise<TerminalSessionInfo>,
+
+  writeTerminal: (data: string) =>
+    ipcRenderer.invoke(IPC.terminalWrite, data) as Promise<void>,
+
+  resizeTerminal: (cols: number, rows: number) =>
+    ipcRenderer.invoke(IPC.terminalResize, cols, rows) as Promise<void>,
+
+  killTerminal: () => ipcRenderer.invoke(IPC.terminalKill) as Promise<void>,
+
+  setTerminalPanelVisible: (visible: boolean) =>
+    ipcRenderer.invoke(IPC.terminalPanelVisible, visible) as Promise<void>,
+
+  onTerminalEvent: (listener: (event: TerminalEvent) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: TerminalEvent) => listener(payload);
+    ipcRenderer.on(IPC.terminalEvent, handler);
+    return () => ipcRenderer.removeListener(IPC.terminalEvent, handler);
   },
 
   onAgentEvent: (listener: (event: AgentEvent) => void) => {

@@ -2,6 +2,7 @@ import type { AgentEvent, AgentInteractionRequest, AgentInteractionResponse, Age
 import { useEffect, useMemo, useRef, useState } from "react";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import { WorkspaceContent, activeWorkspacePath, type WorkspaceView } from "./WorkspaceContent";
+import { TerminalPanel } from "./TerminalPanel";
 
 interface AppInfo {
   name: string;
@@ -89,6 +90,7 @@ export function App() {
   const [thinking, setThinking] = useState("");
   const [interaction, setInteraction] = useState<AgentInteractionRequest | null>(null);
   const [browserState, setBrowserState] = useState<BrowserState>(EMPTY_BROWSER_STATE);
+  const [terminalVisible, setTerminalVisible] = useState(false);
   const assistantMessageId = useRef<string | null>(null);
 
   useEffect(() => {
@@ -217,6 +219,10 @@ export function App() {
   async function toggleBrowser() {
     const next = await window.kripl.setBrowserVisible(!browserState.visible);
     setBrowserState(next);
+  }
+
+  function toggleTerminal() {
+    setTerminalVisible((current) => !current);
   }
 
   async function disconnectAgent() {
@@ -397,7 +403,7 @@ export function App() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={"app-shell" + (terminalVisible ? " terminal-open" : "")}>
       <header className="titlebar">
         <div className="brand">
           <span className="brand-mark">K</span>
@@ -411,6 +417,14 @@ export function App() {
           title={browserState.url || "Show interactive browser"}
         >
           {browserState.loading ? "Browser · loading" : browserState.visible ? "Browser · open" : "Browser"}
+        </button>
+        <button
+          className={"browser-toggle" + (terminalVisible ? " active" : "")}
+          type="button"
+          onClick={toggleTerminal}
+          title="Toggle terminal"
+        >
+          Terminal
         </button>
         <div className="runtime-pill">
           <span className="status-dot" />
@@ -676,13 +690,19 @@ export function App() {
           <div className="status-card">
             <span className="eyebrow">Next</span>
             <ol>
-              <li>Add integrated terminal.</li>
               <li>Add session persistence and recent projects UI.</li>
               <li>Add permission/network profile settings.</li>
             </ol>
           </div>
         </aside>
       </div>
+
+      <TerminalPanel
+        visible={terminalVisible}
+        workspaceOpen={Boolean(workspace)}
+        workspaceKey={workspace?.path ?? ""}
+        onClose={() => setTerminalVisible(false)}
+      />
 
       {interaction && (
         <div className="interaction-backdrop" role="presentation">

@@ -189,6 +189,7 @@
 
 
 .browser-toggle {
+  -webkit-app-region: no-drag;
   border: 1px solid #2d3744;
   border-radius: 999px;
   background: #151b22;

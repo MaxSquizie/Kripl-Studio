@@ -9,7 +9,7 @@ import { BrowserWindow, WebContentsView, session as electronSession } from "elec
 
 const BROWSER_PARTITION = "persist:kripl-browser";
 const ISOLATED_WORLD_ID = 1001;
-const TITLEBAR_HEIGHT = 44;
+const TITLEBAR_HEIGHT = 52;
 const MIN_BROWSER_WIDTH = 480;
 const MAX_BROWSER_WIDTH = 860;
 
@@ -282,6 +282,7 @@ export class BrowserRuntime {
   private loading = false;
   private lastError: string | undefined;
   private redirectGeneration = 0;
+  private bottomInset = 0;
 
   constructor(private readonly window: BrowserWindow) {
     const browserSession = electronSession.fromPartition(BROWSER_PARTITION, { cache: true });
@@ -292,7 +293,7 @@ export class BrowserRuntime {
       void shouldBlockRequestUrl(details.url)
         .then((blocked) => callback({ cancel: blocked }))
         .catch(() => callback({ cancel: true }));
-    });;
+    });
 
     this.view = new WebContentsView({
       webPreferences: {
@@ -376,6 +377,11 @@ export class BrowserRuntime {
     if (visible) this.layout();
     this.emit();
     return this.getState();
+  }
+
+  setBottomInset(pixels: number): void {
+    this.bottomInset = Math.min(600, Math.max(0, Math.floor(pixels)));
+    if (this.visible) this.layout();
   }
 
   async navigate(input: string): Promise<BrowserState> {
@@ -481,7 +487,7 @@ export class BrowserRuntime {
       x: Math.max(0, width - browserWidth),
       y: TITLEBAR_HEIGHT,
       width: Math.min(browserWidth, width),
-      height: Math.max(0, height - TITLEBAR_HEIGHT)
+      height: Math.max(0, height - TITLEBAR_HEIGHT - this.bottomInset)
     });
   }
 

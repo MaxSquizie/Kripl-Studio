@@ -1,6 +1,7 @@
-import type { AgentEvent, AgentInteractionResponse, AgentStatus, BrowserState, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, AgentStatus, BrowserState, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
 import { LocalOpenAIProvider } from "@kripl/local-openai-provider";
 import { PiAgentRuntime } from "@kripl/pi-adapter";
+import { PtyTerminalRuntime } from "@kripl/terminal";
 import { LocalWorkspaceRuntime } from "@kripl/workspace";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { dirname, join } from "node:path";
@@ -26,7 +27,14 @@ const IPC = {
   agentEvent: "kripl:agent-event",
   browserGetState: "kripl:browser-get-state",
   browserSetVisible: "kripl:browser-set-visible",
-  browserState: "kripl:browser-state"
+  browserState: "kripl:browser-state",
+  terminalGetState: "kripl:terminal-get-state",
+  terminalStart: "kripl:terminal-start",
+  terminalWrite: "kripl:terminal-write",
+  terminalResize: "kripl:terminal-resize",
+  terminalKill: "kripl:terminal-kill",
+  terminalPanelVisible: "kripl:terminal-panel-visible",
+  terminalEvent: "kripl:terminal-event"
 } as const;
 
 interface AgentStartRequest {
@@ -45,7 +53,9 @@ let activeAgentStatus: AgentStatus = "idle";
 let browserRuntime: BrowserRuntime | undefined;
 let toolBridgeServer: ToolBridgeServer | undefined;
 let browserUnsubscribe: (() => void) | undefined;
+let terminalUnsubscribe: (() => void) | undefined;
 const workspaceRuntime = new LocalWorkspaceRuntime();
+const terminalRuntime = new PtyTerminalRuntime();
 
 
 function emptyBrowserState(): BrowserState {
@@ -118,9 +128,20 @@ function forwardAgentEvent(target: Electron.WebContents, event: AgentEvent): voi
   target.send(IPC.agentEvent, event);
 }
 
+function initializeTerminalForwarding(window: BrowserWindow): void {
+  terminalUnsubscribe?.();
+  terminalUnsubscribe = terminalRuntime.subscribe((event: TerminalEvent) => {
+    if (!window.webContents.isDestroyed()) {
+      window.webContents.send(IPC.terminalEvent, event);
+    }
+  });
+}
+
 async function initializeBrowserRuntime(window: BrowserWindow): Promise<void> {
   browserUnsubscribe?.();
   browserUnsubscribe = undefined;
+  terminalUnsubscribe?.();
+  terminalUnsubscribe = undefined;
 
   browserRuntime?.dispose();
   browserRuntime = undefined;
@@ -188,7 +209,10 @@ function registerIpc(): void {
     const selected = result.filePaths[0];
     if (!selected) return null;
 
-    await disposeActiveAgent();
+    await Promise.all([
+      disposeActiveAgent(),
+      terminalRuntime.kill()
+    ]);
     return workspaceRuntime.open(selected);
   });
 
@@ -348,6 +372,80 @@ function registerIpc(): void {
   );
 
 
+
+  ipcMain.handle(IPC.terminalGetState, (): TerminalSessionInfo | null => {
+    return terminalRuntime.state();
+  });
+
+  ipcMain.handle(
+    IPC.terminalStart,
+    async (_event, request: unknown): Promise<TerminalSessionInfo> => {
+      const workspace = workspaceRuntime.descriptor();
+      if (!workspace) throw new Error("Open a workspace before starting the terminal.");
+
+      let cols: number | undefined;
+      let rows: number | undefined;
+
+      if (request !== undefined) {
+        if (!request || typeof request !== "object") {
+          throw new Error("Invalid terminal start request.");
+        }
+        const record = request as Record<string, unknown>;
+        if (record.cols !== undefined) {
+          if (typeof record.cols !== "number" || !Number.isFinite(record.cols)) {
+            throw new Error("Terminal cols must be a finite number.");
+          }
+          cols = record.cols;
+        }
+        if (record.rows !== undefined) {
+          if (typeof record.rows !== "number" || !Number.isFinite(record.rows)) {
+            throw new Error("Terminal rows must be a finite number.");
+          }
+          rows = record.rows;
+        }
+      }
+
+      return terminalRuntime.start({
+        cwd: workspace.path,
+        ...(cols === undefined ? {} : { cols }),
+        ...(rows === undefined ? {} : { rows })
+      });
+    }
+  );
+
+  ipcMain.handle(IPC.terminalWrite, async (_event, data: unknown): Promise<void> => {
+    if (typeof data !== "string" || data.length > 64 * 1024) {
+      throw new Error("Invalid terminal input.");
+    }
+    await terminalRuntime.write(data);
+  });
+
+  ipcMain.handle(
+    IPC.terminalResize,
+    async (_event, cols: unknown, rows: unknown): Promise<void> => {
+      if (
+        typeof cols !== "number" ||
+        !Number.isFinite(cols) ||
+        typeof rows !== "number" ||
+        !Number.isFinite(rows)
+      ) {
+        throw new Error("Terminal dimensions must be finite numbers.");
+      }
+      await terminalRuntime.resize(cols, rows);
+    }
+  );
+
+  ipcMain.handle(IPC.terminalKill, async (): Promise<void> => {
+    await terminalRuntime.kill();
+  });
+
+  ipcMain.handle(IPC.terminalPanelVisible, (_event, visible: unknown): void => {
+    if (typeof visible !== "boolean") {
+      throw new Error("Terminal panel visibility must be a boolean.");
+    }
+    browserRuntime?.setBottomInset(visible ? 260 : 0);
+  });
+
   ipcMain.handle(IPC.browserGetState, (): BrowserState => {
     return browserRuntime?.getState() ?? emptyBrowserState();
   });
@@ -373,11 +471,13 @@ void app.whenReady().then(async () => {
   registerIpc();
   const window = createWindow();
   await initializeBrowserRuntime(window);
+  initializeTerminalForwarding(window);
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       const nextWindow = createWindow();
       void initializeBrowserRuntime(nextWindow);
+      initializeTerminalForwarding(nextWindow);
     }
   });
 });
@@ -389,6 +489,7 @@ app.on("before-quit", () => {
   browserRuntime = undefined;
   void toolBridgeServer?.dispose();
   toolBridgeServer = undefined;
+  void terminalRuntime.dispose();
   void workspaceRuntime.dispose();
   void disposeActiveAgent();
 });

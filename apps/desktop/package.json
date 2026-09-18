@@ -9,14 +9,19 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "dist:win": "npm run build && electron-builder --win nsis"
+    "dist:win": "npm run build && electron-builder --win nsis",
+    "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.85.1",
     "@kripl/core": "0.0.1",
     "@kripl/local-openai-provider": "0.0.1",
     "@kripl/pi-adapter": "0.0.1",
-    "@kripl/workspace": "0.0.1"
+    "@kripl/workspace": "0.0.1",
+    "@kripl/terminal": "0.0.1",
+    "@xterm/xterm": "6.0.0",
+    "@xterm/addon-fit": "0.11.0",
+    "node-pty": "1.1.0"
   },
   "devDependencies": {
     "@types/node": "22.20.3",
@@ -49,6 +54,11 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
-    }
+    },
+    "npmRebuild": true,
+    "nativeRebuilder": "sequential",
+    "asarUnpack": [
+      "node_modules/node-pty/**"
+    ]
   }
 }

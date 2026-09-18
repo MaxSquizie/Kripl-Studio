@@ -12,6 +12,7 @@
     "dev": "npm run build:packages && npm run dev --workspace @kripl/desktop",
     "build": "npm run build:packages && npm run build --workspace @kripl/desktop",
     "typecheck": "npm run build:packages && npm run typecheck --workspace @kripl/desktop",
+    "test": "npm run build:packages && npm test --workspace @kripl/local-openai-provider",
     "dist:win": "npm run build:packages && npm run dist:win --workspace @kripl/desktop"
   },
   "engines": {

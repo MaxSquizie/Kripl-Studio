@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInteractionResponse, BrowserState } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, BrowserState, WorkspaceChange, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview } from "@kripl/core";
 
 export {};
 
@@ -17,7 +17,11 @@ declare global {
         networkMode: "online" | "restricted" | "offline";
         modelRouting: "local-only" | "allow-remote";
       }>;
-      pickWorkspace(): Promise<string | null>;
+      pickWorkspace(): Promise<WorkspaceDescriptor | null>;
+      listWorkspace(path?: string): Promise<WorkspaceEntry[]>;
+      readWorkspaceFile(path: string): Promise<WorkspaceFilePreview>;
+      getWorkspaceChanges(): Promise<WorkspaceChange[]>;
+      getWorkspaceDiff(path: string): Promise<WorkspaceDiff>;
       probeLocalModels(endpoint: string): Promise<{
         ok: boolean;
         endpoint: string;
@@ -32,7 +36,6 @@ declare global {
         error?: string;
       }>;
       startAgent(request: {
-        workspacePath: string;
         endpoint: string;
         modelId: string;
       }): Promise<ActionResult>;

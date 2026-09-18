@@ -73,16 +73,24 @@ function isObviouslyLocalHostname(hostname: string): boolean {
   );
 }
 
-function shouldBlockRequestUrl(input: string): boolean {
+async function shouldBlockRequestUrl(input: string): Promise<boolean> {
   try {
     const url = new URL(input);
     if (url.protocol === "data:" || url.protocol === "blob:" || url.protocol === "about:") {
       return false;
     }
     if (url.protocol !== "http:" && url.protocol !== "https:") return true;
+
     const hostname = url.hostname.replace(/^\[|\]$/g, "");
-    if (isObviouslyLocalHostname(hostname)) return true;
-    return Boolean(isIP(hostname) && isBlockedAddress(hostname));
+    if (!hostname || isObviouslyLocalHostname(hostname)) return true;
+    if (isIP(hostname)) return isBlockedAddress(hostname);
+
+    try {
+      const addresses = await lookup(hostname, { all: true, verbatim: true });
+      return addresses.length === 0 || addresses.some((item) => isBlockedAddress(item.address));
+    } catch {
+      return true;
+    }
   } catch {
     return true;
   }
@@ -281,8 +289,10 @@ export class BrowserRuntime {
     browserSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
     browserSession.on("will-download", (event) => event.preventDefault());
     browserSession.webRequest.onBeforeRequest((details, callback) => {
-      callback({ cancel: shouldBlockRequestUrl(details.url) });
-    });
+      void shouldBlockRequestUrl(details.url)
+        .then((blocked) => callback({ cancel: blocked }))
+        .catch(() => callback({ cancel: true }));
+    });;
 
     this.view = new WebContentsView({
       webPreferences: {

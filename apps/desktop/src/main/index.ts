@@ -136,7 +136,8 @@ function registerIpc(): void {
     name: app.getName(),
     version: app.getVersion(),
     platform: process.platform,
-    offlineFirst: true
+    networkMode: "online",
+    modelRouting: "local-only"
   }));
 
   ipcMain.handle(IPC.pickWorkspace, async () => {
@@ -186,7 +187,8 @@ function registerIpc(): void {
         localModel: {
           baseUrl: localModel.endpoint,
           modelId: localModel.modelId
-        }
+        },
+        networkMode: "online"
       });
 
       activeAgent = agent;

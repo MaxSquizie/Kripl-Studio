@@ -14,7 +14,8 @@ declare global {
         name: string;
         version: string;
         platform: string;
-        offlineFirst: boolean;
+        networkMode: "online" | "restricted" | "offline";
+        modelRouting: "local-only" | "allow-remote";
       }>;
       pickWorkspace(): Promise<string | null>;
       probeLocalModels(endpoint: string): Promise<{

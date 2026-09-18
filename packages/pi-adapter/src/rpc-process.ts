@@ -83,7 +83,7 @@ export function createPiEnvironment(options: PiRpcStartOptions): NodeJS.ProcessE
 }
 
 export class PiRpcProcess {
-  private child?: ChildProcessWithoutNullStreams;
+  private child: ChildProcessWithoutNullStreams | undefined;
   private stdoutBuffer = "";
   private stderrBuffer = "";
   private readonly pending = new Map<string, PendingRequest>();

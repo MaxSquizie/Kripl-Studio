@@ -46,7 +46,7 @@ export class PiAgentRuntime implements AgentRuntime {
 
   private readonly rpc = new PiRpcProcess();
   private readonly listeners = new Set<AgentEventListener>();
-  private unsubscribeRpc?: Unsubscribe;
+  private unsubscribeRpc: Unsubscribe | undefined;
 
   constructor(private readonly options: PiAgentRuntimeOptions) {}
 

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { loadExtensions } from "@earendil-works/pi-coding-agent";
+import { dirname } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -14,6 +15,13 @@ import {
   KRIPL_PI_PROVIDER,
   writePiLocalModelConfig
 } from "../dist/pi-local-config.js";
+
+async function loadPiExtensions(paths, cwd) {
+  const packageEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
+  const loaderPath = join(dirname(packageEntry), "core", "extensions", "loader.js");
+  const loader = await import(pathToFileURL(loaderPath).href);
+  return loader.loadExtensions(paths, cwd);
+}
 
 test("writes an isolated Pi provider config for the selected local model", async () => {
   const directory = await mkdtemp(join(tmpdir(), "kripl-pi-"));
@@ -220,7 +228,7 @@ test("generated web extension loads and registers search/open tools", async () =
   try {
     await writePiWebTools(directory, "online");
     const extensionPath = join(directory, "extensions", "kripl-web-tools.ts");
-    const result = await loadExtensions([extensionPath], directory);
+    const result = await loadPiExtensions([extensionPath], directory);
 
     assert.deepEqual(result.errors, []);
     assert.equal(result.extensions.length, 1);
@@ -239,7 +247,7 @@ test("web tools fail closed in offline mode before issuing requests", async () =
   try {
     await writePiWebTools(directory, "offline");
     const extensionPath = join(directory, "extensions", "kripl-web-tools.ts");
-    const result = await loadExtensions([extensionPath], directory);
+    const result = await loadPiExtensions([extensionPath], directory);
     assert.deepEqual(result.errors, []);
 
     const search = result.extensions[0]?.tools.get("web_search");
@@ -263,7 +271,7 @@ test("web_open blocks localhost without touching the network", async () => {
   try {
     await writePiWebTools(directory, "online");
     const extensionPath = join(directory, "extensions", "kripl-web-tools.ts");
-    const result = await loadExtensions([extensionPath], directory);
+    const result = await loadPiExtensions([extensionPath], directory);
     assert.deepEqual(result.errors, []);
 
     const open = result.extensions[0]?.tools.get("web_open");

@@ -1,9 +1,16 @@
 import type {
   DesktopPersistenceState,
+  DesktopRuntimeSettings,
   DesktopUiState,
   RecentProject,
   WorkspaceDescriptor
 } from "@kripl/core";
+import { DEFAULT_RUNTIME_POLICY } from "@kripl/core";
+import {
+  DEFAULT_PERMISSION_POLICY,
+  clonePermissionPolicy,
+  parsePermissionPolicy
+} from "@kripl/permissions";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -19,6 +26,10 @@ function defaultState(): DesktopPersistenceState {
     ui: {
       workspaceView: { type: "agent" },
       expandedDirectories: []
+    },
+    runtime: {
+      ...DEFAULT_RUNTIME_POLICY,
+      permissions: clonePermissionPolicy(DEFAULT_PERMISSION_POLICY)
     }
   };
 }
@@ -97,6 +108,36 @@ function normalizeUi(value: unknown): DesktopUiState {
   };
 }
 
+function normalizeRuntime(value: unknown): DesktopRuntimeSettings {
+  const fallback = defaultState().runtime;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return fallback;
+
+  const record = value as Record<string, unknown>;
+  const networkMode =
+    record.networkMode === "online" ||
+    record.networkMode === "restricted" ||
+    record.networkMode === "offline"
+      ? record.networkMode
+      : fallback.networkMode;
+  const modelRouting =
+    record.modelRouting === "local-only" || record.modelRouting === "allow-remote"
+      ? record.modelRouting
+      : fallback.modelRouting;
+
+  let permissions = fallback.permissions;
+  try {
+    permissions = parsePermissionPolicy(record.permissions);
+  } catch {
+    permissions = clonePermissionPolicy(DEFAULT_PERMISSION_POLICY);
+  }
+
+  return {
+    networkMode,
+    modelRouting,
+    permissions
+  };
+}
+
 export function normalizeDesktopPersistenceState(value: unknown): DesktopPersistenceState {
   if (!value || typeof value !== "object" || Array.isArray(value)) return defaultState();
 
@@ -104,12 +145,14 @@ export function normalizeDesktopPersistenceState(value: unknown): DesktopPersist
   const recentProjects = normalizeRecentProjects(record.recentProjects);
   const lastWorkspacePath = normalizePath(record.lastWorkspacePath);
   const ui = normalizeUi(record.ui);
+  const runtime = normalizeRuntime(record.runtime);
 
   return {
     version: 1,
     recentProjects,
     ...(lastWorkspacePath ? { lastWorkspacePath } : {}),
-    ui
+    ui,
+    runtime
   };
 }
 
@@ -142,6 +185,11 @@ export class JsonDesktopStateStore {
       ui: {
         workspaceView: { ...this.state.ui.workspaceView },
         expandedDirectories: [...this.state.ui.expandedDirectories]
+      },
+      runtime: {
+        networkMode: this.state.runtime.networkMode,
+        modelRouting: this.state.runtime.modelRouting,
+        permissions: clonePermissionPolicy(this.state.runtime.permissions)
       }
     };
   }
@@ -186,6 +234,12 @@ export class JsonDesktopStateStore {
   async setUiState(ui: DesktopUiState): Promise<void> {
     await this.ensureLoaded();
     this.state.ui = normalizeUi(ui);
+    await this.persist();
+  }
+
+  async setRuntimeSettings(runtime: DesktopRuntimeSettings): Promise<void> {
+    await this.ensureLoaded();
+    this.state.runtime = normalizeRuntime(runtime);
     await this.persist();
   }
 

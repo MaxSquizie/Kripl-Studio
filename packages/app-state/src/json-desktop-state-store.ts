@@ -200,7 +200,7 @@ export class JsonDesktopStateStore {
 
   private async persist(): Promise<void> {
     const snapshot = this.snapshot();
-    this.writeChain = this.writeChain.then(async () => {
+    this.writeChain = this.writeChain.catch(() => {}).then(async () => {
       await mkdir(dirname(this.filePath), { recursive: true });
       const temporary = this.filePath + "." + randomUUID() + ".tmp";
       await writeFile(temporary, JSON.stringify(snapshot, null, 2) + "\n", {

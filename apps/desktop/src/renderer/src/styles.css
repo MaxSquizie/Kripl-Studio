@@ -41,7 +41,7 @@ button {
 
 .titlebar {
   display: grid;
-  grid-template-columns: 260px 1fr 260px;
+  grid-template-columns: 240px minmax(220px, 1fr) auto 220px;
   align-items: center;
   border-bottom: 1px solid #222831;
   background: rgba(14, 17, 22, 0.92);
@@ -355,6 +355,260 @@ button {
   }
 
   .titlebar {
-    grid-template-columns: 220px 1fr 180px;
+    grid-template-columns: 220px minmax(160px, 1fr) auto 160px;
   }
+}
+
+
+.workspace-sidebar {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) minmax(150px, 36%);
+  overflow: hidden;
+}
+
+.explorer-section,
+.changes-section {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.changes-section {
+  border-top: 1px solid #222831;
+}
+
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.explorer-body {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.project-root {
+  display: grid;
+  gap: 3px;
+  border-bottom: 1px solid #1d232b;
+  padding: 11px 13px;
+}
+
+.project-root strong {
+  overflow: hidden;
+  color: #d4dae2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.project-root span {
+  color: #6e7988;
+  font-size: 10px;
+}
+
+.tree-scroll,
+.changes-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 5px 0;
+}
+
+.tree-row,
+.change-row {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tree-row {
+  display: flex;
+  min-height: 27px;
+  align-items: center;
+  gap: 5px;
+  padding-top: 4px;
+  padding-right: 8px;
+  padding-bottom: 4px;
+  color: #aeb7c4;
+  font-size: 12px;
+}
+
+.tree-row:hover,
+.tree-row.selected {
+  background: #1a2029;
+  color: #e0e5eb;
+}
+
+.tree-row.selected {
+  box-shadow: inset 2px 0 0 #60769d;
+}
+
+.tree-chevron {
+  width: 12px;
+  flex: 0 0 12px;
+  color: #687484;
+  font-size: 10px;
+  text-align: center;
+}
+
+.tree-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-meta {
+  margin-left: auto;
+  color: #6e7b8d;
+  font-size: 10px;
+}
+
+.change-count {
+  display: grid;
+  min-width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 999px;
+  background: #202731;
+  color: #9ea8b6;
+  font-size: 10px;
+}
+
+.change-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 4px 10px;
+  color: #aeb7c4;
+  font-size: 11px;
+}
+
+.change-row:hover {
+  background: #1a2029;
+}
+
+.change-status {
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-weight: 700;
+}
+
+.status-modified .change-status {
+  color: #d3bd78;
+}
+
+.status-added .change-status,
+.status-untracked .change-status {
+  color: #83c99a;
+}
+
+.status-deleted .change-status,
+.status-conflicted .change-status {
+  color: #d9878c;
+}
+
+.status-renamed .change-status {
+  color: #86a9d8;
+}
+
+.change-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.change-stage {
+  color: #6f7c8d;
+  font-size: 9px;
+}
+
+.sidebar-note {
+  margin: 0;
+  padding: 12px 13px;
+  color: #717c8a;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.workspace-view-header h1 {
+  max-width: min(760px, 65vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.workspace-view-title {
+  min-width: 0;
+}
+
+.workspace-content {
+  min-height: 0;
+  overflow: auto;
+  background: #0c1015;
+}
+
+.file-metadata {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: 12px;
+  border-bottom: 1px solid #202731;
+  background: rgba(14, 18, 24, 0.96);
+  padding: 8px 14px;
+  color: #778392;
+  font-size: 10px;
+}
+
+.code-view {
+  min-width: 100%;
+  width: max-content;
+  margin: 0;
+  padding: 16px 18px 40px;
+  color: #c7ced8;
+  tab-size: 2;
+  white-space: pre;
+  font: 12px/1.58 "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+}
+
+.binary-preview {
+  margin: 28px;
+  border: 1px dashed #313a47;
+  border-radius: 10px;
+  padding: 22px;
+  color: #8b96a5;
+  font-size: 12px;
+}
+
+.diff-line {
+  display: block;
+  min-height: 1.58em;
+}
+
+.diff-line.addition {
+  background: rgba(74, 128, 86, 0.16);
+  color: #aad2b2;
+}
+
+.diff-line.deletion {
+  background: rgba(139, 67, 72, 0.16);
+  color: #d7a8ab;
+}
+
+.diff-line.hunk {
+  color: #91a9d4;
+}
+
+.diff-line.header {
+  color: #a4adba;
+  font-weight: 600;
 }

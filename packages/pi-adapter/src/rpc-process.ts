@@ -66,7 +66,7 @@ const REMOTE_PROVIDER_ENV_KEYS = [
   "AWS_BEARER_TOKEN_BEDROCK"
 ] as const;
 
-function createOfflineEnvironment(options: PiRpcStartOptions): NodeJS.ProcessEnv {
+export function createOfflineEnvironment(options: PiRpcStartOptions): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = { ...process.env };
 
   for (const key of REMOTE_PROVIDER_ENV_KEYS) {

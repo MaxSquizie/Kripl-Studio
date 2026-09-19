@@ -22,6 +22,19 @@ export interface WorkspaceFilePreview {
   content?: string;
 }
 
+export interface WorkspaceFileSearchResult {
+  path: string;
+  name: string;
+  score: number;
+}
+
+export interface WorkspaceTextSearchResult {
+  path: string;
+  line: number;
+  column: number;
+  preview: string;
+}
+
 export type WorkspaceChangeStatus =
   | "modified"
   | "added"
@@ -71,6 +84,8 @@ export interface WorkspaceRuntime {
   list(path?: string): Promise<WorkspaceEntry[]>;
   readFile(path: string): Promise<WorkspaceFilePreview>;
   writeFile(path: string, content: string): Promise<WorkspaceFilePreview>;
+  searchFiles(query: string, limit?: number): Promise<WorkspaceFileSearchResult[]>;
+  searchText(query: string, limit?: number): Promise<WorkspaceTextSearchResult[]>;
   getChanges(): Promise<WorkspaceChange[]>;
   getDiff(path: string): Promise<WorkspaceDiff>;
   getGitStatus(): Promise<WorkspaceGitStatus>;

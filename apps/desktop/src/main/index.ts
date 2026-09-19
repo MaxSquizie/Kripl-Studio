@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceGitStatus } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
 import { JsonDesktopStateStore } from "@kripl/app-state";
 import { InspectableContextRuntime } from "@kripl/context-runtime";
 import { LocalOpenAIProvider } from "@kripl/local-openai-provider";
@@ -29,6 +29,8 @@ const IPC = {
   workspaceList: "kripl:workspace-list",
   workspaceReadFile: "kripl:workspace-read-file",
   workspaceWriteFile: "kripl:workspace-write-file",
+  workspaceSearchFiles: "kripl:workspace-search-files",
+  workspaceSearchText: "kripl:workspace-search-text",
   workspaceChanges: "kripl:workspace-changes",
   workspaceDiff: "kripl:workspace-diff",
   workspaceStage: "kripl:workspace-stage",
@@ -556,6 +558,32 @@ function registerIpc(): void {
         binary: preview.binary
       });
       return preview;
+    }
+  );
+
+  ipcMain.handle(
+    IPC.workspaceSearchFiles,
+    async (_event, query: unknown, limit: unknown): Promise<WorkspaceFileSearchResult[]> => {
+      if (typeof query !== "string" || query.length > 512) {
+        throw new Error("Invalid workspace file search query.");
+      }
+      if (limit !== undefined && (typeof limit !== "number" || !Number.isFinite(limit))) {
+        throw new Error("Invalid workspace file search limit.");
+      }
+      return workspaceRuntime.searchFiles(query, typeof limit === "number" ? limit : undefined);
+    }
+  );
+
+  ipcMain.handle(
+    IPC.workspaceSearchText,
+    async (_event, query: unknown, limit: unknown): Promise<WorkspaceTextSearchResult[]> => {
+      if (typeof query !== "string" || query.length > 512) {
+        throw new Error("Invalid workspace text search query.");
+      }
+      if (limit !== undefined && (typeof limit !== "number" || !Number.isFinite(limit))) {
+        throw new Error("Invalid workspace text search limit.");
+      }
+      return workspaceRuntime.searchText(query, typeof limit === "number" ? limit : undefined);
     }
   );
 

@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceGitStatus } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
 import { contextBridge, ipcRenderer } from "electron";
 
 const IPC = {
@@ -15,6 +15,8 @@ const IPC = {
   workspaceList: "kripl:workspace-list",
   workspaceReadFile: "kripl:workspace-read-file",
   workspaceWriteFile: "kripl:workspace-write-file",
+  workspaceSearchFiles: "kripl:workspace-search-files",
+  workspaceSearchText: "kripl:workspace-search-text",
   workspaceChanges: "kripl:workspace-changes",
   workspaceDiff: "kripl:workspace-diff",
   workspaceStage: "kripl:workspace-stage",
@@ -94,6 +96,12 @@ const api = {
 
   writeWorkspaceFile: (path: string, content: string) =>
     ipcRenderer.invoke(IPC.workspaceWriteFile, path, content) as Promise<WorkspaceFilePreview>,
+
+  searchWorkspaceFiles: (query: string, limit = 80) =>
+    ipcRenderer.invoke(IPC.workspaceSearchFiles, query, limit) as Promise<WorkspaceFileSearchResult[]>,
+
+  searchWorkspaceText: (query: string, limit = 120) =>
+    ipcRenderer.invoke(IPC.workspaceSearchText, query, limit) as Promise<WorkspaceTextSearchResult[]>,
 
   getWorkspaceChanges: () => ipcRenderer.invoke(IPC.workspaceChanges) as Promise<WorkspaceChange[]>,
 

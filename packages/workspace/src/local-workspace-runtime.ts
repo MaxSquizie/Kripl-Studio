@@ -7,12 +7,15 @@ import type {
   WorkspaceGitStatus,
   WorkspaceEntry,
   WorkspaceFilePreview,
-  WorkspaceRuntime
+  WorkspaceFileSearchResult,
+  WorkspaceRuntime,
+  WorkspaceTextSearchResult
 } from "@kripl/core";
 import { execFile } from "node:child_process";
 import {
   lstat,
   open as openFileHandle,
+  readFile,
   readdir,
   realpath,
   stat,
@@ -35,6 +38,9 @@ const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
 const MAX_EDIT_BYTES = 2 * 1024 * 1024;
 const MAX_DIFF_CHARS = 250_000;
 const MAX_DIRECTORY_ENTRIES = 5_000;
+const MAX_SEARCH_FILES = 25_000;
+const MAX_SEARCH_BYTES = 1024 * 1024;
+const MAX_SEARCH_RESULTS = 200;
 
 const HIDDEN_HEAVY_DIRECTORIES = new Set([
   ".git",
@@ -93,6 +99,12 @@ interface ResolvedWorkspacePath {
   relative: string;
 }
 
+interface SearchFile {
+  absolute: string;
+  relative: string;
+  size: number;
+}
+
 function toWorkspacePath(path: string): string {
   return path.split(sep).join("/");
 }
@@ -128,6 +140,50 @@ function detectBinary(buffer: Buffer): boolean {
 
 function languageFor(path: string): string | undefined {
   return LANGUAGE_BY_EXTENSION[extname(path).toLowerCase()];
+}
+
+function normalizedSearchLimit(limit: number | undefined): number {
+  if (limit === undefined) return 80;
+  if (!Number.isFinite(limit)) return 80;
+  return Math.max(1, Math.min(MAX_SEARCH_RESULTS, Math.trunc(limit)));
+}
+
+function fuzzyFileScore(path: string, query: string): number | null {
+  const candidate = path.toLowerCase();
+  const name = basename(path).toLowerCase();
+  const needle = query.toLowerCase();
+
+  if (!needle) return 0;
+  if (name === needle) return 0;
+  if (name.startsWith(needle)) return 10 + name.length - needle.length;
+
+  const nameIndex = name.indexOf(needle);
+  if (nameIndex >= 0) return 30 + nameIndex + Math.max(0, name.length - needle.length) / 100;
+
+  const pathIndex = candidate.indexOf(needle);
+  if (pathIndex >= 0) return 60 + pathIndex + Math.max(0, candidate.length - needle.length) / 100;
+
+  let cursor = 0;
+  let gaps = 0;
+  for (const character of needle) {
+    const next = candidate.indexOf(character, cursor);
+    if (next < 0) return null;
+    gaps += next - cursor;
+    cursor = next + 1;
+  }
+
+  return 100 + gaps + candidate.length / 100;
+}
+
+function searchPreview(line: string, column: number, queryLength: number): string {
+  const maxLength = 220;
+  if (line.length <= maxLength) return line.trimEnd();
+
+  const matchStart = Math.max(0, column - 1);
+  const context = Math.max(24, Math.floor((maxLength - queryLength) / 2));
+  const start = Math.max(0, matchStart - context);
+  const end = Math.min(line.length, matchStart + queryLength + context);
+  return (start > 0 ? "…" : "") + line.slice(start, end).trimEnd() + (end < line.length ? "…" : "");
 }
 
 function changeStatus(x: string, y: string): WorkspaceChangeStatus {
@@ -346,6 +402,79 @@ export class LocalWorkspaceRuntime implements WorkspaceRuntime {
     return this.readFile(target.relative);
   }
 
+  async searchFiles(query: string, limit?: number): Promise<WorkspaceFileSearchResult[]> {
+    const normalized = query.trim();
+    if (normalized.length > 512) throw new Error("Workspace file search query is too long.");
+    if (!normalized) return [];
+
+    const maxResults = normalizedSearchLimit(limit);
+    const files = await this.collectSearchFiles();
+    return files
+      .map((file) => ({
+        file,
+        score: fuzzyFileScore(file.relative, normalized)
+      }))
+      .filter((item): item is { file: SearchFile; score: number } => item.score !== null)
+      .sort((left, right) =>
+        left.score === right.score
+          ? left.file.relative.localeCompare(right.file.relative)
+          : left.score - right.score
+      )
+      .slice(0, maxResults)
+      .map(({ file, score }) => ({
+        path: file.relative,
+        name: basename(file.relative),
+        score
+      }));
+  }
+
+  async searchText(query: string, limit?: number): Promise<WorkspaceTextSearchResult[]> {
+    const normalized = query.trim();
+    if (normalized.length > 512) throw new Error("Workspace text search query is too long.");
+    if (!normalized) return [];
+
+    const maxResults = normalizedSearchLimit(limit);
+    const needle = normalized.toLowerCase();
+    const files = await this.collectSearchFiles();
+    const matches: WorkspaceTextSearchResult[] = [];
+
+    for (const file of files) {
+      if (matches.length >= maxResults) break;
+      if (file.size > MAX_SEARCH_BYTES) continue;
+
+      let buffer: Buffer;
+      try {
+        buffer = await readFile(file.absolute);
+      } catch {
+        continue;
+      }
+      if (detectBinary(buffer)) continue;
+
+      const lines = buffer.toString("utf8").replace(/\r\n/g, "\n").split("\n");
+      for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+        if (matches.length >= maxResults) break;
+        const line = lines[lineIndex] ?? "";
+        const lower = line.toLowerCase();
+        let searchFrom = 0;
+
+        while (searchFrom <= lower.length - needle.length) {
+          const found = lower.indexOf(needle, searchFrom);
+          if (found < 0) break;
+          matches.push({
+            path: file.relative,
+            line: lineIndex + 1,
+            column: found + 1,
+            preview: searchPreview(line, found + 1, normalized.length)
+          });
+          if (matches.length >= maxResults) break;
+          searchFrom = found + Math.max(1, needle.length);
+        }
+      }
+    }
+
+    return matches;
+  }
+
   async getChanges(): Promise<WorkspaceChange[]> {
     const root = this.requireRoot();
     if (!this.currentDescriptor?.gitRepository) return [];
@@ -557,6 +686,69 @@ export class LocalWorkspaceRuntime implements WorkspaceRuntime {
     this.rootPath = undefined;
     this.canonicalRoot = undefined;
     this.currentDescriptor = null;
+  }
+
+  private async collectSearchFiles(): Promise<SearchFile[]> {
+    const root = this.requireRoot();
+    const queue: Array<{ absolute: string; relative: string }> = [
+      { absolute: root, relative: "" }
+    ];
+    const visitedDirectories = new Set<string>([root]);
+    const files: SearchFile[] = [];
+
+    while (queue.length > 0 && files.length < MAX_SEARCH_FILES) {
+      const current = queue.shift();
+      if (!current) break;
+
+      let entries;
+      try {
+        entries = await readdir(current.absolute, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      if (entries.length > MAX_DIRECTORY_ENTRIES) continue;
+
+      entries.sort((left, right) =>
+        left.name.localeCompare(right.name, undefined, { sensitivity: "base" })
+      );
+
+      for (const entry of entries) {
+        if (files.length >= MAX_SEARCH_FILES) break;
+        if (entry.isDirectory() && HIDDEN_HEAVY_DIRECTORIES.has(entry.name)) continue;
+
+        const lexical = resolve(current.absolute, entry.name);
+        const workspacePath = current.relative
+          ? current.relative + "/" + entry.name
+          : entry.name;
+
+        let canonical: string;
+        let info;
+        try {
+          canonical = await realpath(lexical);
+          if (!this.isCanonicalInside(canonical)) continue;
+          info = await stat(canonical);
+        } catch {
+          continue;
+        }
+
+        if (info.isDirectory()) {
+          if (HIDDEN_HEAVY_DIRECTORIES.has(entry.name)) continue;
+          if (visitedDirectories.has(canonical)) continue;
+          visitedDirectories.add(canonical);
+          queue.push({ absolute: canonical, relative: toWorkspacePath(workspacePath) });
+          continue;
+        }
+
+        if (!info.isFile()) continue;
+        files.push({
+          absolute: canonical,
+          relative: toWorkspacePath(workspacePath),
+          size: info.size
+        });
+      }
+    }
+
+    return files;
   }
 
   private requireRoot(): string {

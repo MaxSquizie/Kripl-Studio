@@ -10,8 +10,38 @@ import "./terminal.css";
 const root = document.getElementById("root");
 if (!root) throw new Error("Renderer root element was not found.");
 
-createRoot(root).render(
-  <StrictMode>
-    <App />
-  </StrictMode>
-);
+if (!window.kripl) {
+  root.innerHTML = `
+    <main style="
+      height:100%;
+      display:grid;
+      place-items:center;
+      padding:32px;
+      background:#0d1014;
+      color:#eef7f1;
+      font-family:Inter,ui-sans-serif,system-ui,sans-serif;
+    ">
+      <section style="
+        width:min(620px,100%);
+        border:1px solid #29483a;
+        border-radius:14px;
+        background:#111a16;
+        padding:24px;
+      ">
+        <div style="color:#7ed8a4;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;">
+          Kripl Studio startup error
+        </div>
+        <h1 style="margin:10px 0 8px;font-size:24px;">Desktop bridge did not load.</h1>
+        <p style="margin:0;color:#aebdb4;line-height:1.55;">
+          The Electron preload module is unavailable. This build cannot access the workspace or agent runtime.
+        </p>
+      </section>
+    </main>
+  `;
+} else {
+  createRoot(root).render(
+    <StrictMode>
+      <App />
+    </StrictMode>
+  );
+}

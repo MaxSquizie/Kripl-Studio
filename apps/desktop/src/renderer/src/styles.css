@@ -1591,3 +1591,51 @@ button {
   color: #536860;
   font-size: 8px;
 }
+
+
+.editor-position {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  padding: 4px 6px;
+  color: #71867e;
+  cursor: pointer;
+  font: 9px/1.2 "Cascadia Code", Consolas, monospace;
+}
+
+.editor-position:hover {
+  color: #a5c8bb;
+}
+
+.file-metadata .editor-position + .secondary-button {
+  margin-left: 0;
+}
+
+.go-to-line-bar {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #274239;
+  background: #0d1713;
+  padding: 5px 14px;
+  color: #71877f;
+  font-size: 9px;
+}
+
+.go-to-line-bar input {
+  width: 72px;
+  border: 1px solid #315247;
+  border-radius: 5px;
+  background: #09110e;
+  padding: 5px 7px;
+  color: #c4dbd2;
+  outline: 0;
+  text-align: right;
+  font: 10px/1.2 "Cascadia Code", Consolas, monospace;
+}
+
+.go-to-line-bar input:focus {
+  border-color: #5c9b85;
+  box-shadow: 0 0 0 2px rgba(92, 155, 133, 0.12);
+}

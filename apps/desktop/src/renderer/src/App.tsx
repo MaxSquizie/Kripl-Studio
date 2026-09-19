@@ -724,6 +724,9 @@ export function App() {
         delete next[tab.file.path];
         return next;
       });
+      if (editorRevealTarget?.path === tab.file.path) {
+        setEditorRevealTarget(undefined);
+      }
     }
 
     if (workspaceView.type !== "agent" && workspaceViewKey(workspaceView) === key) {

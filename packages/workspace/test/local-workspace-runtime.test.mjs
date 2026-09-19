@@ -249,6 +249,59 @@ test("revert removes an untracked file only when explicitly requested", async ()
 });
 
 
+test("searches project files with fuzzy path matching and skips heavy directories", async () => {
+  const directory = await createGitWorkspace();
+  const runtime = new LocalWorkspaceRuntime();
+
+  try {
+    await mkdir(join(directory, "src", "features"), { recursive: true });
+    await writeFile(join(directory, "src", "features", "WorkspaceSearch.ts"), "export const search = true;\n", "utf8");
+    await mkdir(join(directory, "node_modules", "fake-package"), { recursive: true });
+    await writeFile(join(directory, "node_modules", "fake-package", "WorkspaceSearch.ts"), "ignored\n", "utf8");
+    await runtime.open(directory);
+
+    const direct = await runtime.searchFiles("workspace");
+    assert.equal(direct[0]?.path, "src/features/WorkspaceSearch.ts");
+    assert.equal(direct.some((item) => item.path.includes("node_modules")), false);
+
+    const fuzzy = await runtime.searchFiles("wss");
+    assert.equal(fuzzy.some((item) => item.path === "src/features/WorkspaceSearch.ts"), true);
+  } finally {
+    await runtime.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("searches text case-insensitively with line and column metadata", async () => {
+  const directory = await createGitWorkspace();
+  const runtime = new LocalWorkspaceRuntime();
+
+  try {
+    await mkdir(join(directory, "docs"), { recursive: true });
+    await writeFile(
+      join(directory, "docs", "notes.md"),
+      "alpha\nKripl Search Needle here\nomega needle\n",
+      "utf8"
+    );
+    await writeFile(join(directory, "binary.bin"), Buffer.from([0, 78, 69, 69, 68, 76, 69]));
+    await runtime.open(directory);
+
+    const matches = await runtime.searchText("needle", 10);
+    const notes = matches.filter((item) => item.path === "docs/notes.md");
+
+    assert.equal(notes.length, 2);
+    assert.deepEqual(
+      notes.map((item) => [item.line, item.column]),
+      [[2, 14], [3, 7]]
+    );
+    assert.match(notes[0]?.preview ?? "", /Kripl Search Needle/);
+    assert.equal(matches.some((item) => item.path === "binary.bin"), false);
+  } finally {
+    await runtime.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("reports local Git branch, HEAD and staged/unstaged counters", async () => {
   const directory = await createGitWorkspace();
   const runtime = new LocalWorkspaceRuntime();

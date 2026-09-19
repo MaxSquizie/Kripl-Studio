@@ -31,6 +31,24 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Verify desktop bundle
+        shell: pwsh
+        run: |
+          $main = "apps/desktop/out/main/index.js"
+          $preload = "apps/desktop/out/preload/index.mjs"
+          $renderer = "apps/desktop/out/renderer/index.html"
+
+          foreach ($path in @($main, $preload, $renderer)) {
+            if (-not (Test-Path $path)) {
+              throw "Expected desktop bundle output is missing: $path"
+            }
+          }
+
+          $mainSource = Get-Content $main -Raw
+          if ($mainSource -notmatch [regex]::Escape("../preload/index.mjs")) {
+            throw "Packaged main bundle does not reference the generated preload module."
+          }
+
       - name: Package Windows
         run: npm run dist:win
 

@@ -1,7 +1,7 @@
 import type { AgentEvent, AgentInteractionRequest, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, BrowserState, ContextInspectorSnapshot, DesktopRuntimeSettings, DesktopUiState, RecentProject, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceEntry, WorkspaceFilePreview, WorkspaceGitStatus } from "@kripl/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
-import { WorkspaceContent, activeWorkspacePath, type WorkspaceDocumentView, type WorkspaceView } from "./WorkspaceContent";
+import { WorkspaceContent, activeWorkspacePath, type WorkspaceDocumentView, type WorkspaceEditorRevealTarget, type WorkspaceView } from "./WorkspaceContent";
 import { WorkspaceTabs, upsertWorkspaceTab, workspaceViewKey } from "./WorkspaceTabs";
 import { TerminalPanel } from "./TerminalPanel";
 import { RecentProjectsCard } from "./RecentProjectsCard";
@@ -89,6 +89,7 @@ export function App() {
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>({ type: "agent" });
   const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceDocumentView[]>([]);
   const [editorDrafts, setEditorDrafts] = useState<Record<string, string>>({});
+  const [editorRevealTarget, setEditorRevealTarget] = useState<WorkspaceEditorRevealTarget | undefined>(undefined);
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [runtimeSettings, setRuntimeSettings] = useState<DesktopRuntimeSettings | null>(null);
   const [contextSnapshot, setContextSnapshot] = useState<ContextInspectorSnapshot | null>(null);
@@ -469,6 +470,7 @@ export function App() {
         ? { [nextView.file.path]: nextView.file.content ?? "" }
         : {}
     );
+    setEditorRevealTarget(undefined);
     setBinding(null);
     setAgentStatus("idle");
     setMessages([]);
@@ -652,13 +654,27 @@ export function App() {
     });
   }
 
-  async function openWorkspaceFile(path: string) {
+  async function openWorkspaceFile(
+    path: string,
+    location?: { line: number; column: number; length: number }
+  ) {
     try {
       const file = await window.kripl.readWorkspaceFile(path);
       const view: WorkspaceDocumentView = { type: "file", file };
       reconcileEditorDraft(file);
       setWorkspaceTabs((current) => upsertWorkspaceTab(current, view));
       setWorkspaceView(view);
+      setEditorRevealTarget(
+        location
+          ? {
+              path,
+              line: location.line,
+              column: location.column,
+              length: location.length,
+              requestId: crypto.randomUUID()
+            }
+          : undefined
+      );
       persistWorkspaceUi(view);
     } catch (error) {
       setAgentError(error instanceof Error ? error.message : String(error));
@@ -671,6 +687,7 @@ export function App() {
       const view: WorkspaceDocumentView = { type: "diff", diff };
       setWorkspaceTabs((current) => upsertWorkspaceTab(current, view));
       setWorkspaceView(view);
+      setEditorRevealTarget(undefined);
       persistWorkspaceUi(view);
     } catch (error) {
       setAgentError(error instanceof Error ? error.message : String(error));
@@ -683,6 +700,7 @@ export function App() {
 
   function selectWorkspaceView(view: WorkspaceView) {
     setWorkspaceView(view);
+    setEditorRevealTarget(undefined);
     persistWorkspaceUi(view);
   }
 
@@ -706,6 +724,9 @@ export function App() {
         delete next[tab.file.path];
         return next;
       });
+      if (editorRevealTarget?.path === tab.file.path) {
+        setEditorRevealTarget(undefined);
+      }
     }
 
     if (workspaceView.type !== "agent" && workspaceViewKey(workspaceView) === key) {
@@ -1088,6 +1109,7 @@ export function App() {
                   ? editorDrafts[workspaceView.file.path]
                   : undefined
               }
+              revealTarget={editorRevealTarget}
               onDraftChange={updateEditorDraft}
               onSaveFile={saveWorkspaceFile}
               onStage={stageWorkspaceChange}

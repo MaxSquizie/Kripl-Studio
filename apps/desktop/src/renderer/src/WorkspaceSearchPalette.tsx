@@ -12,7 +12,10 @@ export function WorkspaceSearchPalette({
   mode: WorkspaceSearchMode;
   onModeChange(mode: WorkspaceSearchMode): void;
   onClose(): void;
-  onOpenFile(path: string): Promise<void>;
+  onOpenFile(
+    path: string,
+    location?: { line: number; column: number; length: number }
+  ): Promise<void>;
 }) {
   const [query, setQuery] = useState("");
   const [fileResults, setFileResults] = useState<WorkspaceFileSearchResult[]>([]);
@@ -93,9 +96,27 @@ export function WorkspaceSearchPalette({
     return textResults[selectedIndex]?.path;
   }, [fileResults, mode, selectedIndex, textResults]);
 
-  async function openSelected(path = selectedPath) {
+  const selectedLocation = useMemo(() => {
+    if (mode !== "text") return undefined;
+    const result = textResults[selectedIndex];
+    if (!result) return undefined;
+    return {
+      line: result.line,
+      column: result.column,
+      length: query.trim().length
+    };
+  }, [mode, query, selectedIndex, textResults]);
+
+  async function openSelected(
+    path = selectedPath,
+    location: { line: number; column: number; length: number } | undefined = selectedLocation
+  ) {
     if (!path) return;
-    await onOpenFile(path);
+    if (location) {
+      await onOpenFile(path, location);
+    } else {
+      await onOpenFile(path);
+    }
     onClose();
   }
 
@@ -206,7 +227,13 @@ export function WorkspaceSearchPalette({
                 key={result.path + ":" + result.line + ":" + result.column + ":" + index}
                 title={result.path}
                 onMouseEnter={() => setSelectedIndex(index)}
-                onClick={() => void openSelected(result.path)}
+                onClick={() =>
+                  void openSelected(result.path, {
+                    line: result.line,
+                    column: result.column,
+                    length: query.trim().length
+                  })
+                }
               >
                 <span className="search-result-location">{result.line}:{result.column}</span>
                 <span className="search-result-main">

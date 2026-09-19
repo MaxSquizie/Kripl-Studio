@@ -46,7 +46,7 @@ export function WorkspaceSearchPalette({
     let cancelled = false;
     setLoading(true);
     const timer = window.setTimeout(() => {
-      const request =
+      const request: Promise<WorkspaceFileSearchResult[] | WorkspaceTextSearchResult[]> =
         mode === "files"
           ? window.kripl.searchWorkspaceFiles(normalized, 80)
           : window.kripl.searchWorkspaceText(normalized, 120);

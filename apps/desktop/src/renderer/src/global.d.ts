@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceGitStatus } from "@kripl/core";
+import type { AgentEvent, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
 
 export {};
 
@@ -29,6 +29,8 @@ declare global {
       listWorkspace(path?: string): Promise<WorkspaceEntry[]>;
       readWorkspaceFile(path: string): Promise<WorkspaceFilePreview>;
       writeWorkspaceFile(path: string, content: string): Promise<WorkspaceFilePreview>;
+      searchWorkspaceFiles(query: string, limit?: number): Promise<WorkspaceFileSearchResult[]>;
+      searchWorkspaceText(query: string, limit?: number): Promise<WorkspaceTextSearchResult[]>;
       getWorkspaceChanges(): Promise<WorkspaceChange[]>;
       getWorkspaceDiff(path: string): Promise<WorkspaceDiff>;
       stageWorkspaceChange(path: string): Promise<void>;

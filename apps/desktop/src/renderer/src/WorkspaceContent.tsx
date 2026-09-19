@@ -132,6 +132,13 @@ function FileEditor({
   const dirty = editable && draft !== (file.content ?? "");
 
   useEffect(() => {
+    setCursor({ line: 1, column: 1 });
+    setGoToLineOpen(false);
+    setGoToLineValue("");
+    setError("");
+  }, [file.path]);
+
+  useEffect(() => {
     if (!editable || !revealTarget || revealTarget.path !== file.path) return;
     const editor = editorRef.current;
     if (!editor) return;

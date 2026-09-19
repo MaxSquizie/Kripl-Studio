@@ -226,7 +226,7 @@ function FileEditor({
         transformed.push(line.slice(1));
         removed.push(1);
       } else {
-        const spaces = Math.min(2, line.match(/^ */)?.[0].length ?? 0);
+        const spaces = Math.min(2, (line.match(/^ */)?.[0] ?? "").length);
         transformed.push(line.slice(spaces));
         removed.push(spaces);
       }

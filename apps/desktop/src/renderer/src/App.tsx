@@ -9,6 +9,7 @@ import { RuntimeSettingsCard } from "./RuntimeSettingsCard";
 import { ContextInspectorCard } from "./ContextInspectorCard";
 import { AgentSessionCard } from "./AgentSessionCard";
 import { GitStatusCard } from "./GitStatusCard";
+import { WorkspaceSearchPalette, type WorkspaceSearchMode } from "./WorkspaceSearchPalette";
 
 interface AppInfo {
   name: string;
@@ -106,6 +107,7 @@ export function App() {
   const [interaction, setInteraction] = useState<AgentInteractionRequest | null>(null);
   const [browserState, setBrowserState] = useState<BrowserState>(EMPTY_BROWSER_STATE);
   const [terminalVisible, setTerminalVisible] = useState(false);
+  const [workspaceSearchMode, setWorkspaceSearchMode] = useState<WorkspaceSearchMode | null>(null);
   const assistantMessageId = useRef<string | null>(null);
 
   useEffect(() => {
@@ -150,6 +152,26 @@ export function App() {
       unsubscribeContext();
     };
   }, []);
+
+  useEffect(() => {
+    function onShortcut(event: KeyboardEvent) {
+      if (!workspace || !(event.ctrlKey || event.metaKey)) return;
+
+      const key = event.key.toLowerCase();
+      if (key === "p" && !event.shiftKey && !event.altKey) {
+        event.preventDefault();
+        setWorkspaceSearchMode("files");
+        return;
+      }
+      if (key === "f" && event.shiftKey && !event.altKey) {
+        event.preventDefault();
+        setWorkspaceSearchMode("text");
+      }
+    }
+
+    window.addEventListener("keydown", onShortcut);
+    return () => window.removeEventListener("keydown", onShortcut);
+  }, [workspace]);
 
   useEffect(() => {
     return window.kripl.onAgentEvent((event: AgentEvent) => {
@@ -931,6 +953,15 @@ export function App() {
           local model · network {runtimeSettings?.networkMode ?? "online"}
         </div>
       </header>
+
+      {workspace && workspaceSearchMode && (
+        <WorkspaceSearchPalette
+          mode={workspaceSearchMode}
+          onModeChange={setWorkspaceSearchMode}
+          onClose={() => setWorkspaceSearchMode(null)}
+          onOpenFile={openWorkspaceFile}
+        />
+      )}
 
       <div className="workspace">
         <WorkspaceSidebar

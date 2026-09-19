@@ -1,7 +1,8 @@
-import type { AgentEvent, AgentInteractionRequest, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, BrowserState, ContextInspectorSnapshot, DesktopRuntimeSettings, DesktopUiState, RecentProject, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceEntry, WorkspaceGitStatus } from "@kripl/core";
+import type { AgentEvent, AgentInteractionRequest, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, BrowserState, ContextInspectorSnapshot, DesktopRuntimeSettings, DesktopUiState, RecentProject, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceEntry, WorkspaceFilePreview, WorkspaceGitStatus } from "@kripl/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
-import { WorkspaceContent, activeWorkspacePath, type WorkspaceView } from "./WorkspaceContent";
+import { WorkspaceContent, activeWorkspacePath, type WorkspaceDocumentView, type WorkspaceView } from "./WorkspaceContent";
+import { WorkspaceTabs, upsertWorkspaceTab, workspaceViewKey } from "./WorkspaceTabs";
 import { TerminalPanel } from "./TerminalPanel";
 import { RecentProjectsCard } from "./RecentProjectsCard";
 import { RuntimeSettingsCard } from "./RuntimeSettingsCard";
@@ -85,6 +86,8 @@ export function App() {
   const [workspaceChanges, setWorkspaceChanges] = useState<WorkspaceChange[]>([]);
   const [gitStatus, setGitStatus] = useState<WorkspaceGitStatus | null>(null);
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>({ type: "agent" });
+  const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceDocumentView[]>([]);
+  const [editorDrafts, setEditorDrafts] = useState<Record<string, string>>({});
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [runtimeSettings, setRuntimeSettings] = useState<DesktopRuntimeSettings | null>(null);
   const [contextSnapshot, setContextSnapshot] = useState<ContextInspectorSnapshot | null>(null);
@@ -274,6 +277,16 @@ export function App() {
   const canStartAgent = Boolean(workspace && modelReady) && agentStatus !== "starting";
   const canSend = bindingMatchesSelection && agentStatus === "ready";
 
+  const dirtyEditorPaths = useMemo(() => {
+    const dirty = new Set<string>();
+    for (const tab of workspaceTabs) {
+      if (tab.type !== "file" || tab.file.binary || tab.file.truncated) continue;
+      const draft = editorDrafts[tab.file.path] ?? tab.file.content ?? "";
+      if (draft !== (tab.file.content ?? "")) dirty.add(tab.file.path);
+    }
+    return dirty;
+  }, [editorDrafts, workspaceTabs]);
+
 
   async function toggleBrowser() {
     if (runtimeSettings?.networkMode === "offline") return;
@@ -428,6 +441,12 @@ export function App() {
     setWorkspaceChanges(changes);
     setGitStatus(nextGitStatus);
     setWorkspaceView(nextView);
+    setWorkspaceTabs(nextView.type === "agent" ? [] : [nextView]);
+    setEditorDrafts(
+      nextView.type === "file"
+        ? { [nextView.file.path]: nextView.file.content ?? "" }
+        : {}
+    );
     setBinding(null);
     setAgentStatus("idle");
     setMessages([]);
@@ -443,7 +462,18 @@ export function App() {
     await refreshAgentSessions(bootstrap.lastSessionPath);
   }
 
+  function confirmWorkspaceSwitch(): boolean {
+    if (dirtyEditorPaths.size === 0) return true;
+
+    const count = dirtyEditorPaths.size;
+    return window.confirm(
+      `You have ${count} unsaved editor buffer${count === 1 ? "" : "s"}. Switching projects will discard ${count === 1 ? "it" : "them"}.\n\nContinue?`
+    );
+  }
+
   async function openWorkspace() {
+    if (!confirmWorkspaceSwitch()) return;
+
     try {
       const selected = await window.kripl.pickWorkspace();
       if (!selected) return;
@@ -460,6 +490,9 @@ export function App() {
   }
 
   async function openRecentProject(path: string) {
+    if (path === workspace?.path) return;
+    if (!confirmWorkspaceSwitch()) return;
+
     try {
       const selected = await window.kripl.openRecentProject(path);
       await hydrateWorkspace(selected, {
@@ -511,8 +544,20 @@ export function App() {
       if (workspaceView.type === "file") {
         try {
           const file = await window.kripl.readWorkspaceFile(workspaceView.file.path);
-          setWorkspaceView({ type: "file", file });
+          const view: WorkspaceDocumentView = { type: "file", file };
+          reconcileEditorDraft(file);
+          setWorkspaceView(view);
+          setWorkspaceTabs((current) => upsertWorkspaceTab(current, view));
         } catch {
+          const staleKey = workspaceViewKey(workspaceView);
+          setWorkspaceTabs((current) =>
+            current.filter((tab) => workspaceViewKey(tab) !== staleKey)
+          );
+          setEditorDrafts((current) => {
+            const next = { ...current };
+            delete next[workspaceView.file.path];
+            return next;
+          });
           const view: WorkspaceView = { type: "agent" };
           setWorkspaceView(view);
           persistWorkspaceUi(view);
@@ -520,8 +565,14 @@ export function App() {
       } else if (workspaceView.type === "diff") {
         try {
           const diff = await window.kripl.getWorkspaceDiff(workspaceView.diff.path);
-          setWorkspaceView({ type: "diff", diff });
+          const view: WorkspaceDocumentView = { type: "diff", diff };
+          setWorkspaceView(view);
+          setWorkspaceTabs((current) => upsertWorkspaceTab(current, view));
         } catch {
+          const staleKey = workspaceViewKey(workspaceView);
+          setWorkspaceTabs((current) =>
+            current.filter((tab) => workspaceViewKey(tab) !== staleKey)
+          );
           const view: WorkspaceView = { type: "agent" };
           setWorkspaceView(view);
           persistWorkspaceUi(view);
@@ -559,10 +610,32 @@ export function App() {
     }
   }
 
+  function reconcileEditorDraft(file: WorkspaceFilePreview) {
+    const previousTab = workspaceTabs.find(
+      (tab) => tab.type === "file" && tab.file.path === file.path
+    );
+    const previousContent =
+      previousTab?.type === "file" ? previousTab.file.content ?? "" : undefined;
+    const nextContent = file.content ?? "";
+
+    setEditorDrafts((current) => {
+      const existing = current[file.path];
+      const wasDirty =
+        previousContent !== undefined &&
+        existing !== undefined &&
+        existing !== previousContent;
+
+      if (wasDirty || existing === nextContent) return current;
+      return { ...current, [file.path]: nextContent };
+    });
+  }
+
   async function openWorkspaceFile(path: string) {
     try {
       const file = await window.kripl.readWorkspaceFile(path);
-      const view: WorkspaceView = { type: "file", file };
+      const view: WorkspaceDocumentView = { type: "file", file };
+      reconcileEditorDraft(file);
+      setWorkspaceTabs((current) => upsertWorkspaceTab(current, view));
       setWorkspaceView(view);
       persistWorkspaceUi(view);
     } catch (error) {
@@ -573,11 +646,51 @@ export function App() {
   async function openWorkspaceDiff(path: string) {
     try {
       const diff = await window.kripl.getWorkspaceDiff(path);
-      const view: WorkspaceView = { type: "diff", diff };
+      const view: WorkspaceDocumentView = { type: "diff", diff };
+      setWorkspaceTabs((current) => upsertWorkspaceTab(current, view));
       setWorkspaceView(view);
       persistWorkspaceUi(view);
     } catch (error) {
       setAgentError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  function updateEditorDraft(path: string, content: string) {
+    setEditorDrafts((current) => ({ ...current, [path]: content }));
+  }
+
+  function selectWorkspaceView(view: WorkspaceView) {
+    setWorkspaceView(view);
+    persistWorkspaceUi(view);
+  }
+
+  function closeWorkspaceTab(tab: WorkspaceDocumentView) {
+    const key = workspaceViewKey(tab);
+    if (tab.type === "file" && dirtyEditorPaths.has(tab.file.path)) {
+      const shouldClose = window.confirm(
+        "This tab has unsaved changes. Close it and discard the editor buffer?\n\n" +
+          tab.file.path
+      );
+      if (!shouldClose) return;
+    }
+
+    const index = workspaceTabs.findIndex((candidate) => workspaceViewKey(candidate) === key);
+    const nextTabs = workspaceTabs.filter((candidate) => workspaceViewKey(candidate) !== key);
+    setWorkspaceTabs(nextTabs);
+
+    if (tab.type === "file") {
+      setEditorDrafts((current) => {
+        const next = { ...current };
+        delete next[tab.file.path];
+        return next;
+      });
+    }
+
+    if (workspaceView.type !== "agent" && workspaceViewKey(workspaceView) === key) {
+      const fallback = nextTabs[Math.min(Math.max(index, 0), nextTabs.length - 1)];
+      const nextView: WorkspaceView = fallback ?? { type: "agent" };
+      setWorkspaceView(nextView);
+      persistWorkspaceUi(nextView);
     }
   }
 
@@ -589,7 +702,9 @@ export function App() {
     ]);
     setWorkspaceChanges(changes);
     setGitStatus(nextGitStatus);
-    const view: WorkspaceView = { type: "file", file };
+    setEditorDrafts((current) => ({ ...current, [path]: file.content ?? "" }));
+    const view: WorkspaceDocumentView = { type: "file", file };
+    setWorkspaceTabs((current) => upsertWorkspaceTab(current, view));
     setWorkspaceView(view);
     persistWorkspaceUi(view);
   }
@@ -605,7 +720,8 @@ export function App() {
 
     if (stillChanged) {
       const diff = await window.kripl.getWorkspaceDiff(path);
-      const view: WorkspaceView = { type: "diff", diff };
+      const view: WorkspaceDocumentView = { type: "diff", diff };
+      setWorkspaceTabs((current) => upsertWorkspaceTab(current, view));
       setWorkspaceView(view);
       persistWorkspaceUi(view);
       return;
@@ -613,7 +729,9 @@ export function App() {
 
     try {
       const file = await window.kripl.readWorkspaceFile(path);
-      const view: WorkspaceView = { type: "file", file };
+      const view: WorkspaceDocumentView = { type: "file", file };
+      reconcileEditorDraft(file);
+      setWorkspaceTabs((current) => upsertWorkspaceTab(current, view));
       setWorkspaceView(view);
       persistWorkspaceUi(view);
     } catch {
@@ -829,6 +947,15 @@ export function App() {
         />
 
         <main className="agent-column">
+          <WorkspaceTabs
+            tabs={workspaceTabs}
+            activeView={workspaceView}
+            dirtyFiles={dirtyEditorPaths}
+            onSelectAgent={() => selectWorkspaceView({ type: "agent" })}
+            onSelect={selectWorkspaceView}
+            onClose={closeWorkspaceTab}
+          />
+
           {workspaceView.type === "agent" ? (
             <>
 
@@ -925,11 +1052,12 @@ export function App() {
           ) : (
             <WorkspaceContent
               view={workspaceView}
-              onBackToAgent={() => {
-                const view: WorkspaceView = { type: "agent" };
-                setWorkspaceView(view);
-                persistWorkspaceUi(view);
-              }}
+              draft={
+                workspaceView.type === "file"
+                  ? editorDrafts[workspaceView.file.path]
+                  : undefined
+              }
+              onDraftChange={updateEditorDraft}
               onSaveFile={saveWorkspaceFile}
               onStage={stageWorkspaceChange}
               onUnstage={unstageWorkspaceChange}

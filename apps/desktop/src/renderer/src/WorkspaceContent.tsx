@@ -1,5 +1,5 @@
 import type { WorkspaceDiff, WorkspaceFilePreview } from "@kripl/core";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export type WorkspaceView =
   | { type: "agent" }
@@ -7,6 +7,14 @@ export type WorkspaceView =
   | { type: "diff"; diff: WorkspaceDiff };
 
 export type WorkspaceDocumentView = Exclude<WorkspaceView, { type: "agent" }>;
+
+export interface WorkspaceEditorRevealTarget {
+  path: string;
+  line: number;
+  column: number;
+  length: number;
+  requestId: string;
+}
 
 export function activeWorkspacePath(view: WorkspaceView): string | undefined {
   if (view.type === "file") return view.file.path;
@@ -18,6 +26,26 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return bytes + " B";
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+function offsetForLineColumn(text: string, line: number, column: number): number {
+  const targetLine = Math.max(1, Math.trunc(line));
+  const targetColumn = Math.max(1, Math.trunc(column));
+  let currentLine = 1;
+  let lineStart = 0;
+
+  while (currentLine < targetLine && lineStart < text.length) {
+    const newline = text.indexOf("\n", lineStart);
+    if (newline < 0) return text.length;
+    lineStart = newline + 1;
+    currentLine += 1;
+  }
+
+  const newline = text.indexOf("\n", lineStart);
+  let lineEnd = newline < 0 ? text.length : newline;
+  if (lineEnd > lineStart && text[lineEnd - 1] === "\r") lineEnd -= 1;
+
+  return Math.min(lineEnd, lineStart + targetColumn - 1);
 }
 
 function DiffContent({ patch }: { patch: string }) {
@@ -48,19 +76,39 @@ function DiffContent({ patch }: { patch: string }) {
 function FileEditor({
   file,
   draft,
+  revealTarget,
   onDraftChange,
   onSave
 }: {
   file: WorkspaceFilePreview;
   draft: string;
+  revealTarget: WorkspaceEditorRevealTarget | undefined;
   onDraftChange(path: string, content: string): void;
   onSave(path: string, content: string): Promise<void>;
 }) {
+  const editorRef = useRef<HTMLTextAreaElement>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const editable = !file.binary && !file.truncated;
   const dirty = editable && draft !== (file.content ?? "");
+
+  useEffect(() => {
+    if (!editable || !revealTarget || revealTarget.path !== file.path) return;
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const start = offsetForLineColumn(draft, revealTarget.line, revealTarget.column);
+    const end = Math.min(draft.length, start + Math.max(0, revealTarget.length));
+    editor.focus();
+    editor.setSelectionRange(start, end);
+
+    const approximateLineHeight = 19;
+    editor.scrollTop = Math.max(
+      0,
+      (revealTarget.line - 1) * approximateLineHeight - editor.clientHeight / 3
+    );
+  }, [editable, file.path, revealTarget?.requestId]);
 
   async function save() {
     if (!dirty || saving) return;
@@ -110,6 +158,7 @@ function FileEditor({
         </>
       ) : (
         <textarea
+          ref={editorRef}
           className="code-editor"
           value={draft}
           spellCheck={false}
@@ -215,6 +264,7 @@ function DiffReview({
 export function WorkspaceContent({
   view,
   draft,
+  revealTarget,
   onDraftChange,
   onSaveFile,
   onStage,
@@ -223,6 +273,7 @@ export function WorkspaceContent({
 }: {
   view: WorkspaceDocumentView;
   draft: string | undefined;
+  revealTarget: WorkspaceEditorRevealTarget | undefined;
   onDraftChange(path: string, content: string): void;
   onSaveFile(path: string, content: string): Promise<void>;
   onStage(path: string): Promise<void>;
@@ -246,6 +297,7 @@ export function WorkspaceContent({
           <FileEditor
             file={view.file}
             draft={draft ?? view.file.content ?? ""}
+            revealTarget={revealTarget}
             onDraftChange={onDraftChange}
             onSave={onSaveFile}
           />

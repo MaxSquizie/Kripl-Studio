@@ -386,7 +386,7 @@ function createWindow(): BrowserWindow {
     title: "Kripl Studio",
     autoHideMenuBar: true,
     webPreferences: {
-      preload: join(currentDir, "../preload/index.mjs"),
+      preload: join(currentDir, "../preload/index.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true

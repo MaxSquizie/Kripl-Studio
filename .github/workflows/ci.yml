@@ -35,7 +35,7 @@ jobs:
         shell: pwsh
         run: |
           $main = "apps/desktop/out/main/index.js"
-          $preload = "apps/desktop/out/preload/index.mjs"
+          $preload = "apps/desktop/out/preload/index.cjs"
           $renderer = "apps/desktop/out/renderer/index.html"
 
           foreach ($path in @($main, $preload, $renderer)) {
@@ -45,8 +45,13 @@ jobs:
           }
 
           $mainSource = Get-Content $main -Raw
-          if ($mainSource -notmatch [regex]::Escape("../preload/index.mjs")) {
-            throw "Packaged main bundle does not reference the generated preload module."
+          if ($mainSource -notmatch [regex]::Escape("../preload/index.cjs")) {
+            throw "Packaged main bundle does not reference the generated CommonJS preload module."
+          }
+
+          $preloadSource = Get-Content $preload -Raw
+          if ($preloadSource -match "(^|[;\s])import\s") {
+            throw "Sandboxed preload must not contain ESM import statements."
           }
 
       - name: Package Windows

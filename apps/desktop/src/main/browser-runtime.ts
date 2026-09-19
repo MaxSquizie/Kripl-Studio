@@ -6,7 +6,7 @@ import type {
 } from "@kripl/core";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import { BrowserWindow, WebContentsView, session as electronSession } from "electron";
+import { BrowserWindow, WebContentsView, session as electronSession, type WebContents } from "electron";
 
 const BROWSER_PARTITION = "persist:kripl-browser";
 const ISOLATED_WORLD_ID = 1001;
@@ -278,7 +278,12 @@ function typeScript(ref: string, text: string, submit: boolean): string {
 
 export class BrowserRuntime {
   private readonly view: WebContentsView;
+  private readonly contents: WebContents;
   private readonly listeners = new Set<BrowserStateListener>();
+  private disposed = false;
+  private readonly handleWindowResize = () => {
+    if (!this.disposed) this.layout();
+  };
   private visible = false;
   private loading = false;
   private lastError: string | undefined;
@@ -322,12 +327,14 @@ export class BrowserRuntime {
       }
     });
 
+    this.contents = this.view.webContents;
+
     this.view.setBackgroundColor("#0d1014");
     this.view.setVisible(false);
     this.window.contentView.addChildView(this.view);
     this.layout();
 
-    const contents = this.view.webContents;
+    const contents = this.contents;
     contents.setWindowOpenHandler(() => ({ action: "deny" }));
 
     contents.on("will-navigate", (event, url) => {
@@ -363,7 +370,7 @@ export class BrowserRuntime {
       this.emit();
     });
 
-    this.window.on("resize", () => this.layout());
+    this.window.on("resize", this.handleWindowResize);
   }
 
   subscribe(listener: BrowserStateListener): () => void {
@@ -373,7 +380,18 @@ export class BrowserRuntime {
   }
 
   getState(): BrowserState {
-    const contents = this.view.webContents;
+    if (this.disposed || this.contents.isDestroyed()) {
+      return {
+        visible: false,
+        loading: false,
+        url: "",
+        title: "",
+        canGoBack: false,
+        canGoForward: false
+      };
+    }
+
+    const contents = this.contents;
     const state: BrowserState = {
       visible: this.visible,
       loading: this.loading,
@@ -394,7 +412,7 @@ export class BrowserRuntime {
       this.loading = false;
       this.lastError = undefined;
       this.view.setVisible(false);
-      void this.view.webContents.loadURL("about:blank").catch(() => {});
+      void this.contents.loadURL("about:blank").catch(() => {});
     }
 
     this.emit();
@@ -428,7 +446,7 @@ export class BrowserRuntime {
     const redirectGeneration = this.redirectGeneration;
 
     try {
-      await this.view.webContents.loadURL(url.toString());
+      await this.contents.loadURL(url.toString());
     } catch (error) {
       if (this.redirectGeneration !== redirectGeneration && isAbortError(error)) {
         return this.getState();
@@ -441,19 +459,19 @@ export class BrowserRuntime {
   }
 
   back(): BrowserState {
-    const history = this.view.webContents.navigationHistory;
+    const history = this.contents.navigationHistory;
     if (history.canGoBack()) history.goBack();
     return this.getState();
   }
 
   forward(): BrowserState {
-    const history = this.view.webContents.navigationHistory;
+    const history = this.contents.navigationHistory;
     if (history.canGoForward()) history.goForward();
     return this.getState();
   }
 
   async snapshot(): Promise<BrowserSnapshot> {
-    const result = await this.view.webContents.executeJavaScriptInIsolatedWorld(
+    const result = await this.contents.executeJavaScriptInIsolatedWorld(
       ISOLATED_WORLD_ID,
       [{ code: snapshotScript() }]
     );
@@ -479,15 +497,15 @@ export class BrowserRuntime {
       .filter((item) => item.ref);
 
     return {
-      url: typeof record.url === "string" ? record.url : this.view.webContents.getURL(),
-      title: typeof record.title === "string" ? record.title : this.view.webContents.getTitle(),
+      url: typeof record.url === "string" ? record.url : this.contents.getURL(),
+      title: typeof record.title === "string" ? record.title : this.contents.getTitle(),
       text: typeof record.text === "string" ? record.text.slice(0, 30_000) : "",
       elements
     };
   }
 
   async click(ref: string): Promise<BrowserState> {
-    await this.view.webContents.executeJavaScriptInIsolatedWorld(
+    await this.contents.executeJavaScriptInIsolatedWorld(
       ISOLATED_WORLD_ID,
       [{ code: clickScript(ref) }],
       true
@@ -496,7 +514,7 @@ export class BrowserRuntime {
   }
 
   async type(ref: string, text: string, submit = false): Promise<BrowserState> {
-    await this.view.webContents.executeJavaScriptInIsolatedWorld(
+    await this.contents.executeJavaScriptInIsolatedWorld(
       ISOLATED_WORLD_ID,
       [{ code: typeScript(ref, text, submit) }],
       true
@@ -505,14 +523,31 @@ export class BrowserRuntime {
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     this.listeners.clear();
-    this.window.contentView.removeChildView(this.view);
-    if (!this.view.webContents.isDestroyed()) {
-      this.view.webContents.close();
+    this.window.removeListener("resize", this.handleWindowResize);
+
+    try {
+      if (!this.window.isDestroyed()) {
+        this.window.contentView.removeChildView(this.view);
+      }
+    } catch {
+      // The native view may already be gone while Electron is tearing down the window.
+    }
+
+    try {
+      if (!this.contents.isDestroyed()) {
+        this.contents.close();
+      }
+    } catch {
+      // Dispose must be safe even when Electron destroyed WebContents first.
     }
   }
 
   private layout(): void {
+    if (this.disposed || this.window.isDestroyed()) return;
+
     const size = this.window.getContentSize();
     const width = size[0] ?? 0;
     const height = size[1] ?? 0;
@@ -529,12 +564,14 @@ export class BrowserRuntime {
   }
 
   private recordError(error: unknown): void {
+    if (this.disposed) return;
     this.loading = false;
     this.lastError = error instanceof Error ? error.message : String(error);
     this.emit();
   }
 
   private emit(): void {
+    if (this.disposed) return;
     const state = this.getState();
     for (const listener of this.listeners) listener(state);
   }

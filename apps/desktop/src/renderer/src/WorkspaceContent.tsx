@@ -48,6 +48,40 @@ function offsetForLineColumn(text: string, line: number, column: number): number
   return Math.min(lineEnd, lineStart + targetColumn - 1);
 }
 
+function lineColumnForOffset(text: string, offset: number): { line: number; column: number } {
+  const clamped = Math.max(0, Math.min(text.length, offset));
+  let line = 1;
+  let lineStart = 0;
+
+  for (let index = 0; index < clamped; index += 1) {
+    if (text[index] === "\n") {
+      line += 1;
+      lineStart = index + 1;
+    }
+  }
+
+  return { line, column: clamped - lineStart + 1 };
+}
+
+function lineCount(text: string): number {
+  if (!text) return 1;
+  let lines = 1;
+  for (const character of text) {
+    if (character === "\n") lines += 1;
+  }
+  return lines;
+}
+
+function selectedLineRange(text: string, start: number, end: number): { start: number; end: number } {
+  const lineStart = text.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+  let lineEnd = text.indexOf("\n", end);
+  if (lineEnd < 0) lineEnd = text.length;
+  if (end > start && end > 0 && text[end - 1] === "\n") {
+    lineEnd = end - 1;
+  }
+  return { start: lineStart, end: lineEnd };
+}
+
 function DiffContent({ patch }: { patch: string }) {
   return (
     <pre className="code-view diff-view">
@@ -87,11 +121,22 @@ function FileEditor({
   onSave(path: string, content: string): Promise<void>;
 }) {
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  const goToLineRef = useRef<HTMLInputElement>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [cursor, setCursor] = useState({ line: 1, column: 1 });
+  const [goToLineOpen, setGoToLineOpen] = useState(false);
+  const [goToLineValue, setGoToLineValue] = useState("");
 
   const editable = !file.binary && !file.truncated;
   const dirty = editable && draft !== (file.content ?? "");
+
+  useEffect(() => {
+    setCursor({ line: 1, column: 1 });
+    setGoToLineOpen(false);
+    setGoToLineValue("");
+    setError("");
+  }, [file.path]);
 
   useEffect(() => {
     if (!editable || !revealTarget || revealTarget.path !== file.path) return;
@@ -102,6 +147,7 @@ function FileEditor({
     const end = Math.min(draft.length, start + Math.max(0, revealTarget.length));
     editor.focus();
     editor.setSelectionRange(start, end);
+    setCursor(lineColumnForOffset(draft, start));
 
     const approximateLineHeight = 19;
     editor.scrollTop = Math.max(
@@ -109,6 +155,97 @@ function FileEditor({
       (revealTarget.line - 1) * approximateLineHeight - editor.clientHeight / 3
     );
   }, [editable, file.path, revealTarget?.requestId]);
+
+  useEffect(() => {
+    if (!goToLineOpen) return;
+    goToLineRef.current?.focus();
+    goToLineRef.current?.select();
+  }, [goToLineOpen]);
+
+  function updateCursorFromEditor() {
+    const editor = editorRef.current;
+    if (!editor) return;
+    setCursor(lineColumnForOffset(draft, editor.selectionStart));
+  }
+
+  function openGoToLine() {
+    setGoToLineValue(String(cursor.line));
+    setGoToLineOpen(true);
+  }
+
+  function goToLine() {
+    const requested = Number.parseInt(goToLineValue, 10);
+    if (!Number.isFinite(requested)) return;
+    const targetLine = Math.max(1, Math.min(lineCount(draft), requested));
+    const offset = offsetForLineColumn(draft, targetLine, 1);
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    editor.focus();
+    editor.setSelectionRange(offset, offset);
+    setCursor({ line: targetLine, column: 1 });
+    const approximateLineHeight = 19;
+    editor.scrollTop = Math.max(
+      0,
+      (targetLine - 1) * approximateLineHeight - editor.clientHeight / 3
+    );
+    setGoToLineOpen(false);
+  }
+
+  function applyIndent(shift: boolean) {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+
+    if (start === end && !shift) {
+      const next = draft.slice(0, start) + "\t" + draft.slice(end);
+      onDraftChange(file.path, next);
+      window.requestAnimationFrame(() => {
+        editor.focus();
+        editor.setSelectionRange(start + 1, start + 1);
+        setCursor(lineColumnForOffset(next, start + 1));
+      });
+      return;
+    }
+
+    const range = selectedLineRange(draft, start, end);
+    const block = draft.slice(range.start, range.end);
+    const lines = block.split("\n");
+    const transformed: string[] = [];
+    const removed: number[] = [];
+
+    for (const line of lines) {
+      if (!shift) {
+        transformed.push("\t" + line);
+        removed.push(-1);
+        continue;
+      }
+      if (line.startsWith("\t")) {
+        transformed.push(line.slice(1));
+        removed.push(1);
+      } else {
+        const spaces = Math.min(2, (line.match(/^ */)?.[0] ?? "").length);
+        transformed.push(line.slice(spaces));
+        removed.push(spaces);
+      }
+    }
+
+    const replacement = transformed.join("\n");
+    const next = draft.slice(0, range.start) + replacement + draft.slice(range.end);
+    const firstAdjustment = shift ? -(removed[0] ?? 0) : 1;
+    const totalDelta = replacement.length - block.length;
+    const nextStart = Math.max(range.start, start + firstAdjustment);
+    const nextEnd = Math.max(nextStart, end + totalDelta);
+
+    onDraftChange(file.path, next);
+    window.requestAnimationFrame(() => {
+      editor.focus();
+      editor.setSelectionRange(nextStart, nextEnd);
+      setCursor(lineColumnForOffset(next, nextStart));
+    });
+  }
 
   async function save() {
     if (!dirty || saving) return;
@@ -133,6 +270,16 @@ function FileEditor({
         {dirty && <span className="dirty-indicator">modified</span>}
         {editable && (
           <button
+            className="editor-position"
+            type="button"
+            title="Go to line (Ctrl+G)"
+            onClick={openGoToLine}
+          >
+            Ln {cursor.line}, Col {cursor.column}
+          </button>
+        )}
+        {editable && (
+          <button
             className="secondary-button compact"
             type="button"
             disabled={!dirty || saving}
@@ -144,6 +291,30 @@ function FileEditor({
       </div>
 
       {error && <div className="editor-error">{error}</div>}
+
+      {editable && goToLineOpen && (
+        <div className="go-to-line-bar">
+          <span>Go to line</span>
+          <input
+            ref={goToLineRef}
+            value={goToLineValue}
+            inputMode="numeric"
+            aria-label="Line number"
+            onChange={(event) => setGoToLineValue(event.target.value.replace(/[^0-9]/g, ""))}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                goToLine();
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                setGoToLineOpen(false);
+                editorRef.current?.focus();
+              }
+            }}
+          />
+          <span>of {lineCount(draft)}</span>
+        </div>
+      )}
 
       {file.binary ? (
         <div className="binary-preview">
@@ -162,11 +333,28 @@ function FileEditor({
           className="code-editor"
           value={draft}
           spellCheck={false}
-          onChange={(event) => onDraftChange(file.path, event.target.value)}
+          onChange={(event) => {
+            onDraftChange(file.path, event.target.value);
+            const caret = event.target.selectionStart;
+            setCursor(lineColumnForOffset(event.target.value, caret));
+          }}
+          onSelect={updateCursorFromEditor}
+          onKeyUp={updateCursorFromEditor}
+          onClick={updateCursorFromEditor}
           onKeyDown={(event) => {
             if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
               event.preventDefault();
               void save();
+              return;
+            }
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "g") {
+              event.preventDefault();
+              openGoToLine();
+              return;
+            }
+            if (event.key === "Tab") {
+              event.preventDefault();
+              applyIndent(event.shiftKey);
             }
           }}
         />

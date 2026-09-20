@@ -13,7 +13,7 @@ import { CollapsibleDetails } from "./CollapsibleDetails";
 import { AgentPermissionsCard } from "./AgentPermissionsCard";
 import { ModelTuningCard } from "./ModelTuningCard";
 import { RecentProjectsCard } from "./RecentProjectsCard";
-import kriplCodingLoop from "./assets/kripl-coding.webm";
+import kriplCodingLoop from "./assets/kripl-coding.mp4";
 import { Markdown, CopyIconButton } from "./Markdown";
 import { WorkspaceSearchPalette, type WorkspaceSearchMode } from "./WorkspaceSearchPalette";
 

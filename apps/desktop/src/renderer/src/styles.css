@@ -703,6 +703,23 @@ button {
   margin: 0;
   border: none;
   border-radius: 0;
+  background: var(--bg-surface);
+  padding: 12px 14px;
+}
+
+/* Header aligned with the other rail tabs; no native disclosure triangle. */
+.recent-projects-card > summary {
+  display: flex;
+  align-items: center;
+  min-height: 26px;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.recent-projects-card > summary::-webkit-details-marker {
+  display: none;
 }
 
 .recent-project-list {

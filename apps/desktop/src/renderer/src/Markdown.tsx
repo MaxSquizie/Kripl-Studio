@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useState } from "react";
 
 /**
  * Lightweight dependency-free markdown renderer for chat messages.
@@ -60,6 +61,51 @@ function renderInline(text: string, depth = 0): ReactNode[] {
   return nodes;
 }
 
+/** Small copy-to-clipboard button with a brief “copied” confirmation. */
+export function CopyIconButton({ text, title }: { text: string; title?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      return; // clipboard unavailable (e.g. non-secure context) — stay silent
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <button
+      type="button"
+      className={"copy-icon-button" + (copied ? " copied" : "")}
+      title={copied ? "Скопировано" : (title ?? "Скопировать")}
+      onClick={() => void copy()}
+    >
+      {copied ? (
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+          <path d="M2.5 6.5l2.5 2.5L9.5 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      ) : (
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+          <rect x="3.5" y="3.5" width="6" height="6.5" rx="1" stroke="currentColor" strokeWidth="1.2" />
+          <path d="M8.5 3V2a1 1 0 0 0-1-1h-5a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1H3" stroke="currentColor" strokeWidth="1.2" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
+/** Fenced code block with a hover-revealed copy button. */
+function CodeBlock({ lang, code }: { lang?: string | undefined; code: string }) {
+  return (
+    <div className="code-block">
+      <pre>{lang ? <code className="lang">{code}</code> : <code>{code}</code>}</pre>
+      <CopyIconButton text={code} title="Скопировать код" />
+    </div>
+  );
+}
+
 function isListMarker(line: string): "ul" | "ol" | null {
   if (/^\s*[-*]\s+/.test(line)) return "ul";
   if (/^\s*\d+[.)]\s+/.test(line)) return "ol";
@@ -100,13 +146,7 @@ function renderBlocks(text: string): ReactNode[] {
       }
       i += 1; // skip closing fence if present
       blocks.push(
-        <pre key={`b${key++}`}>
-          {fence[1] ? (
-            <code className="lang">{body.join("\n")}</code>
-          ) : (
-            <code>{body.join("\n")}</code>
-          )}
-        </pre>,
+        <CodeBlock key={`b${key++}`} lang={fence[1] || undefined} code={body.join("\n")} />
       );
       continue;
     }

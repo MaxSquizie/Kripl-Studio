@@ -38,6 +38,66 @@
   font-weight: 700;
 }
 
+/* Hover actions on assistant bubbles: copy answer, regenerate. */
+.message-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.chat-message:hover .message-actions {
+  opacity: 1;
+}
+
+.copy-icon-button,
+.regenerate-button {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 0;
+}
+
+.copy-icon-button:hover,
+.regenerate-button:hover {
+  color: var(--kripl-accent-bright);
+  background: color-mix(in srgb, var(--kripl-accent) 12%, transparent);
+}
+
+.copy-icon-button.copied {
+  color: var(--success);
+}
+
+.regenerate-button {
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* Code block with a hover-revealed copy button. */
+.code-block {
+  position: relative;
+}
+
+.code-block .copy-icon-button {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  opacity: 0;
+  background: var(--bg-overlay);
+}
+
+.code-block:hover .copy-icon-button,
+.code-block .copy-icon-button.copied {
+  opacity: 1;
+}
+
 .message-tokps {
   color: var(--text-faint);
   text-transform: none;

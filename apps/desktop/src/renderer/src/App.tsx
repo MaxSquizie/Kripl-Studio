@@ -12,7 +12,7 @@ import { GitStatusCard } from "./GitStatusCard";
 import { CollapsibleDetails } from "./CollapsibleDetails";
 import { AgentPermissionsCard } from "./AgentPermissionsCard";
 import { ModelTuningCard } from "./ModelTuningCard";
-import { Markdown } from "./Markdown";
+import { Markdown, CopyIconButton } from "./Markdown";
 import { WorkspaceSearchPalette, type WorkspaceSearchMode } from "./WorkspaceSearchPalette";
 
 function formatBytes(size: number): string {
@@ -273,6 +273,13 @@ export function App() {
   // Wall-clock span of the pending activity (first step → last event).
   const activityStartRef = useRef<number | null>(null);
   const activityEndRef = useRef<number | null>(null);
+
+  // Chat scrolling: stick to the bottom while the user is near it, otherwise
+  // count new messages and offer a jump-to-bottom button.
+  const conversationRef = useRef<HTMLDivElement | null>(null);
+  const nearBottomRef = useRef(true);
+  const seenFeedLengthRef = useRef(0);
+  const [pendingMessages, setPendingMessages] = useState(0);
   // Assistant message ids created during the current run (for tok/s).
   const runAssistantIdsRef = useRef<Set<string>>(new Set());
   // A tool call happened after the last assistant bubble was created: the next
@@ -375,6 +382,20 @@ export function App() {
     window.addEventListener("keydown", onShortcut);
     return () => window.removeEventListener("keydown", onShortcut);
   }, [workspace]);
+
+  // Stick to the bottom while the user is near it; otherwise count new
+  // messages for the jump-to-bottom button.
+  useEffect(() => {
+    const el = conversationRef.current;
+    if (!el) return;
+    if (nearBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+      seenFeedLengthRef.current = feed.length;
+      setPendingMessages(0);
+    } else if (feed.length > seenFeedLengthRef.current) {
+      setPendingMessages(feed.length - seenFeedLengthRef.current);
+    }
+  }, [feed]);
 
   useEffect(() => {
     return window.kripl.onAgentEvent((event: AgentEvent) => {
@@ -1379,7 +1400,44 @@ export function App() {
     setAgentError("");
     assistantMessageId.current = null;
 
+    // A fresh prompt always pulls the view back to the bottom.
+    nearBottomRef.current = true;
+
     const result = await window.kripl.sendAgentMessage(finalText);
+    if (!result.ok) {
+      setAgentStatus("error");
+      setAgentError(result.error ?? "Prompt was rejected.");
+    }
+  }
+
+  /**
+   * Regenerate a disliked answer: drop it (and anything after it), then re-run
+   * the preceding user prompt with an explicit regenerate directive, so the
+   * model sees its discarded answer and produces a fresh one. Attachment
+   * messages cannot be resent and are excluded.
+   */
+  async function regenerateAnswer(id: string): Promise<void> {
+    if (!canSend) return;
+    const index = feed.findIndex((item) => item.kind === "message" && item.id === id);
+    if (index < 0) return;
+
+    let userMessage: MessageItem | null = null;
+    for (let i = index - 1; i >= 0; i -= 1) {
+      const item = feed[i];
+      if (item && item.kind === "message" && item.role === "user") {
+        userMessage = item;
+        break;
+      }
+    }
+    if (!userMessage || (userMessage.images && userMessage.images.length > 0)) return;
+
+    discardTurnActivity();
+    setFeed((current) => current.slice(0, index)); // keep the prompt, drop the answer
+    assistantMessageId.current = null;
+    nearBottomRef.current = true;
+
+    const directive = `${userMessage.text}\n\n[Regenerate] Your previous answer to this message was discarded by the user. Produce a fresh answer.`;
+    const result = await window.kripl.sendAgentMessage(directive);
     if (!result.ok) {
       setAgentStatus("error");
       setAgentError(result.error ?? "Prompt was rejected.");
@@ -1519,7 +1577,21 @@ export function App() {
           {workspaceView.type === "agent" ? (
             <>
 
-          <div className="conversation">
+          <div
+            className="conversation"
+            ref={conversationRef}
+            onScroll={() => {
+              const el = conversationRef.current;
+              if (!el) return;
+              const nearBottom =
+                el.scrollTop + el.clientHeight >= el.scrollHeight - 60;
+              nearBottomRef.current = nearBottom;
+              if (nearBottom) {
+                seenFeedLengthRef.current = feed.length;
+                setPendingMessages(0);
+              }
+            }}
+          >
             {feed.length === 0 ? (
               <section className="welcome-card">
                 <span className="eyebrow">Kripl Studio</span>
@@ -1553,6 +1625,23 @@ export function App() {
                             <span className="message-tokps">{tokps} tok/s</span>
                           ) : null;
                         })()}
+                        {item.role === "assistant" && (
+                          <span className="message-actions">
+                            {item.text.trim() !== "" && (
+                              <CopyIconButton text={item.text} title="Скопировать ответ" />
+                            )}
+                            {canSend && item.id === lastAssistantId && !item.images?.length ? (
+                              <button
+                                type="button"
+                                className="regenerate-button"
+                                title="Перегенерировать: удалить этот ответ и запустить промпт заново"
+                                onClick={() => void regenerateAnswer(item.id)}
+                              >
+                                ↻
+                              </button>
+                            ) : null}
+                          </span>
+                        )}
                       </div>
                       {item.role === "assistant" && item.reasoning ? (
                         <CollapsibleDetails
@@ -1662,6 +1751,24 @@ export function App() {
             )}
 
             {agentError && <div className="agent-error">{agentError}</div>}
+
+            {/* Sticky anchor: pins the pill to the visible bottom while the
+                user is scrolled up, sits at content end otherwise. */}
+            <div className="jump-anchor">
+              {pendingMessages > 0 && (
+                <button
+                  type="button"
+                  className="jump-to-bottom"
+                  title="К последним сообщениям"
+                  onClick={() => {
+                    const el = conversationRef.current;
+                    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+                  }}
+                >
+                  ↓ {pendingMessages}
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="composer">

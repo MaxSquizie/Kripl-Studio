@@ -10,9 +10,12 @@ import { BrowserWindow, WebContentsView, session as electronSession, type WebCon
 
 const BROWSER_PARTITION = "persist:kripl-browser";
 const ISOLATED_WORLD_ID = 1001;
-const TITLEBAR_HEIGHT = 52;
-const MIN_BROWSER_WIDTH = 480;
-const MAX_BROWSER_WIDTH = 860;
+// Renderer layout constants (kept in sync with styles.css): the embedded view
+// only covers the center column so the sidebars stay interactive.
+const TITLEBAR_HEIGHT = 38;
+const SIDEBAR_WIDTH = 260;
+const COMPACT_SIDEBAR_WIDTH = 220;
+const RAIL_WIDTH = 250;
 
 type BrowserStateListener = (state: BrowserState) => void;
 
@@ -359,6 +362,14 @@ export class BrowserRuntime {
       this.emit();
     });
 
+    // Esc always releases the embedded browser, even if the UI is unreachable.
+    contents.on("before-input-event", (event, input) => {
+      if (input.type === "keyDown" && input.key === "Escape") {
+        event.preventDefault();
+        this.setVisible(false);
+      }
+    });
+
     contents.on("page-title-updated", (_event, _title) => this.emit());
     contents.on("did-navigate", () => this.emit());
     contents.on("did-navigate-in-page", () => this.emit());
@@ -441,7 +452,10 @@ export class BrowserRuntime {
     }
 
     const url = await assertPublicBrowserUrl(input);
-    this.setVisible(true);
+    // Headless by design: the embedded view is never attached to the window.
+    // Web/browser tools surface as regular tool messages in the chat feed.
+    this.visible = false;
+    this.view.setVisible(false);
     this.lastError = undefined;
     const redirectGeneration = this.redirectGeneration;
 
@@ -551,15 +565,19 @@ export class BrowserRuntime {
     const size = this.window.getContentSize();
     const width = size[0] ?? 0;
     const height = size[1] ?? 0;
-    const browserWidth = Math.min(
-      MAX_BROWSER_WIDTH,
-      Math.max(MIN_BROWSER_WIDTH, Math.floor(width * 0.52))
-    );
+    // Center column only: left sidebar and right session/browser rail stay usable.
+    // The browser is a capped panel inside the center column, not a full
+    // takeover: it keeps 12px margins and never covers the sidebars/rail.
+    // Narrow windows (<=1120px) use the compact 220px sidebar from styles.css.
+    const sidebarWidth = width <= 1120 ? COMPACT_SIDEBAR_WIDTH : SIDEBAR_WIDTH;
+    const centerWidth = Math.max(0, width - sidebarWidth - RAIL_WIDTH);
+    const viewWidth = Math.min(Math.max(420, centerWidth), 900);
+    const margin = centerWidth > viewWidth + 24 ? 12 : 0;
     this.view.setBounds({
-      x: Math.max(0, width - browserWidth),
-      y: TITLEBAR_HEIGHT,
-      width: Math.min(browserWidth, width),
-      height: Math.max(0, height - TITLEBAR_HEIGHT - this.bottomInset)
+      x: sidebarWidth + Math.max(margin, (centerWidth - viewWidth) / 2),
+      y: TITLEBAR_HEIGHT + margin,
+      width: viewWidth,
+      height: Math.max(0, height - TITLEBAR_HEIGHT - this.bottomInset - 2 * margin)
     });
   }
 

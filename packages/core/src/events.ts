@@ -2,6 +2,15 @@ export type Unsubscribe = () => void;
 
 export type AgentStatus = "idle" | "starting" | "ready" | "running" | "stopping" | "stopped" | "error";
 
+export interface AttachedFile {
+  name: string;
+  path: string;
+  sizeBytes: number;
+  kind: "image" | "archive" | "text" | "binary";
+  preview?: string;
+  error?: string;
+}
+
 export type AgentInteractionKind = "confirm" | "select" | "input" | "editor";
 
 export interface AgentInteractionRequest {
@@ -67,6 +76,13 @@ export type AgentEvent =
   | {
       type: "agent.interaction";
       request: AgentInteractionRequest;
+    }
+  | {
+      type: "agent.usage";
+      input?: number;
+      output?: number;
+      cacheRead?: number;
+      totalTokens?: number;
     }
   | {
       type: "agent.notification";

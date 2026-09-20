@@ -147,3 +147,4 @@ release/
 apps/desktop/release/
 apps/desktop/out/
 packages/*/dist/
+nul

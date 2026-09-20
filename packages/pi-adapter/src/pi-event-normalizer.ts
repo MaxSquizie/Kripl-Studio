@@ -10,6 +10,10 @@ function contentIndex(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 function normalizeExtensionUiRequest(event: JsonRecord): AgentEvent[] {
   if (typeof event.id !== "string" || typeof event.method !== "string") return [];
 
@@ -117,6 +121,24 @@ export function normalizePiEvent(event: JsonRecord): AgentEvent[] {
       }
 
       return [];
+    }
+
+    case "message_end": {
+      const message = event.message;
+      if (!isRecord(message) || message.role !== "assistant") return [];
+      const usage = isRecord(message.usage) ? message.usage : undefined;
+      if (!usage) return [];
+
+      const agentEvent: AgentEvent = { type: "agent.usage" };
+      const input = finiteNumber(usage.input);
+      const output = finiteNumber(usage.output);
+      const cacheRead = finiteNumber(usage.cacheRead);
+      const totalTokens = finiteNumber(usage.totalTokens);
+      if (input !== undefined) agentEvent.input = input;
+      if (output !== undefined) agentEvent.output = output;
+      if (cacheRead !== undefined) agentEvent.cacheRead = cacheRead;
+      if (totalTokens !== undefined) agentEvent.totalTokens = totalTokens;
+      return [agentEvent];
     }
 
     case "tool_execution_start":

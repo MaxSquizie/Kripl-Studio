@@ -17,6 +17,12 @@ export interface BrowserSnapshotElement {
   placeholder?: string;
 }
 
+export interface BrowserHistoryEntry {
+  url: string;
+  title: string;
+  at: number;
+}
+
 export interface BrowserSnapshot {
   url: string;
   title: string;

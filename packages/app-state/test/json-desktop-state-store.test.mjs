@@ -184,6 +184,31 @@ test("malformed runtime settings fall back to safe defaults", () => {
   assert.equal(state.runtime.permissions.rules["tool.unknown"], "ask");
 });
 
+test("model tuning settings are normalized and clamped", () => {
+  const valid = normalizeDesktopPersistenceState({
+    runtime: {
+      networkMode: "online",
+      modelRouting: "local-only",
+      permissions: { version: 1, rules: {} },
+      modelTuning: { systemPrompt: "Answer in Russian.", temperature: 0.427 }
+    }
+  });
+
+  assert.equal(valid.runtime.modelTuning?.systemPrompt, "Answer in Russian.");
+  assert.equal(valid.runtime.modelTuning?.temperature, 0.43);
+
+  const invalid = normalizeDesktopPersistenceState({
+    runtime: {
+      networkMode: "online",
+      modelRouting: "local-only",
+      permissions: { version: 1, rules: {} },
+      modelTuning: { systemPrompt: 42, temperature: 7 }
+    }
+  });
+
+  assert.equal(invalid.runtime.modelTuning, undefined);
+});
+
 test("last Pi session is remembered independently per workspace", async () => {
   const directory = await mkdtemp(join(tmpdir(), "kripl-state-"));
   const file = join(directory, "desktop-state.json");

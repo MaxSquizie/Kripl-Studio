@@ -1,8 +1,12 @@
-import type { AgentEvent, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
+import type { AgentEvent, AttachedFile, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
 import { contextBridge, ipcRenderer } from "electron";
 
 const IPC = {
   appInfo: "kripl:app-info",
+  windowMinimize: "kripl:window-minimize",
+  windowToggleMaximize: "kripl:window-toggle-maximize",
+  windowClose: "kripl:window-close",
+  windowMaximized: "kripl:window-maximized",
   pickWorkspace: "kripl:pick-workspace",
   desktopBootstrap: "kripl:desktop-bootstrap",
   openRecentProject: "kripl:open-recent-project",
@@ -26,14 +30,23 @@ const IPC = {
   workspaceCommit: "kripl:workspace-commit",
   probeLocalModels: "kripl:probe-local-models",
   agentSessions: "kripl:agent-sessions",
+  agentRenameSession: "kripl:agent-rename-session",
+  agentSessionsChanged: "kripl:agent-sessions-changed",
   agentStart: "kripl:agent-start",
   agentSessionSnapshot: "kripl:agent-session-snapshot",
   agentSend: "kripl:agent-send",
+  pickAttachFiles: "kripl:pick-attach-files",
+  agentAttachFiles: "kripl:agent-attach-files",
+  pasteAgentFiles: "kripl:paste-agent-files",
+  attachPreview: "kripl:attach-preview",
   agentAbort: "kripl:agent-abort",
   agentStop: "kripl:agent-stop",
   agentRespondInteraction: "kripl:agent-respond-interaction",
   agentEvent: "kripl:agent-event",
   browserGetState: "kripl:browser-get-state",
+  browserGetHistory: "kripl:browser-get-history",
+  browserNavigate: "kripl:browser-navigate",
+  browserHistory: "kripl:browser-history",
   browserSetVisible: "kripl:browser-set-visible",
   browserState: "kripl:browser-state",
   terminalGetState: "kripl:terminal-get-state",
@@ -141,6 +154,38 @@ const api = {
   listAgentSessions: () =>
     ipcRenderer.invoke(IPC.agentSessions) as Promise<AgentSessionSummary[]>,
 
+  renameAgentSession: (sessionPath: string, name: string) =>
+    ipcRenderer.invoke(IPC.agentRenameSession, { sessionPath, name }) as Promise<ActionResult>,
+
+  onAgentSessionsChanged: (callback: () => void) => {
+    const listener = (_event: Electron.IpcRendererEvent): void => callback();
+    ipcRenderer.on(IPC.agentSessionsChanged, listener);
+    return () => ipcRenderer.removeListener(IPC.agentSessionsChanged, listener);
+  },
+
+  minimizeWindow: () => ipcRenderer.invoke(IPC.windowMinimize) as Promise<void>,
+
+  toggleMaximizeWindow: () => ipcRenderer.invoke(IPC.windowToggleMaximize) as Promise<void>,
+
+  closeWindow: () => ipcRenderer.invoke(IPC.windowClose) as Promise<void>,
+
+  onWindowMaximized: (callback: (maximized: boolean) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, maximized: boolean): void =>
+      callback(Boolean(maximized));
+    ipcRenderer.on(IPC.windowMaximized, listener);
+    return () => ipcRenderer.removeListener(IPC.windowMaximized, listener);
+  },
+
+  getBrowserHistory: () =>
+    ipcRenderer.invoke(IPC.browserGetHistory) as Promise<BrowserHistoryEntry[]>,
+
+  onBrowserHistory: (callback: (entries: BrowserHistoryEntry[]) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, entries: BrowserHistoryEntry[]): void =>
+      callback(entries);
+    ipcRenderer.on(IPC.browserHistory, listener);
+    return () => ipcRenderer.removeListener(IPC.browserHistory, listener);
+  },
+
   startAgent: (request: { endpoint: string; modelId: string; sessionPath?: string }) =>
     ipcRenderer.invoke(IPC.agentStart, request) as Promise<ActionResult>,
 
@@ -149,6 +194,30 @@ const api = {
 
   sendAgentMessage: (message: string) =>
     ipcRenderer.invoke(IPC.agentSend, message) as Promise<ActionResult>,
+
+  pickAttachFiles: () => ipcRenderer.invoke(IPC.pickAttachFiles) as Promise<string[]>,
+
+  attachAgentFiles: (paths: string[]) =>
+    ipcRenderer.invoke(IPC.agentAttachFiles, paths) as Promise<{
+      ok: boolean;
+      error?: string;
+      files?: AttachedFile[];
+    }>,
+
+  pasteAgentFiles: (items: Array<{ name?: string; dataBase64?: string }>) =>
+    ipcRenderer.invoke(IPC.pasteAgentFiles, items) as Promise<{
+      ok: boolean;
+      error?: string;
+      files?: AttachedFile[];
+    }>,
+
+  readAttachPreview: (path: string) =>
+    ipcRenderer.invoke(IPC.attachPreview, path) as Promise<{
+      ok: boolean;
+      error?: string;
+      mime?: string;
+      dataUrl?: string;
+    }>,
 
   abortAgent: () => ipcRenderer.invoke(IPC.agentAbort) as Promise<ActionResult>,
 
@@ -161,6 +230,14 @@ const api = {
 
   setBrowserVisible: (visible: boolean) =>
     ipcRenderer.invoke(IPC.browserSetVisible, visible) as Promise<BrowserState>,
+
+  navigateBrowser: (url: string) =>
+    ipcRenderer.invoke(IPC.browserNavigate, url).then(
+      (state: BrowserState) => state,
+      (error: unknown) => {
+        throw error instanceof Error ? error : new Error(String(error));
+      }
+    ) as Promise<BrowserState>,
 
   onBrowserState: (listener: (state: BrowserState) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: BrowserState) => listener(payload);

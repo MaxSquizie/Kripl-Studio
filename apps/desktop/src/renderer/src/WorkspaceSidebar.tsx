@@ -4,6 +4,19 @@ import type {
   WorkspaceEntry
 } from "@kripl/core";
 
+/** Compact modification-time label for a change row. */
+function formatChangeTime(mtimeMs: number | undefined): string {
+  if (mtimeMs === undefined) return "";
+  const date = new Date(mtimeMs);
+  const now = new Date();
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mm = String(date.getMinutes()).padStart(2, "0");
+  if (date.toDateString() === now.toDateString()) return `${hh}:${mm}`;
+  return `${String(date.getDate()).padStart(2, "0")}.${String(
+    date.getMonth() + 1
+  ).padStart(2, "0")}`;
+}
+
 interface WorkspaceSidebarProps {
   workspace: WorkspaceDescriptor | null;
   entries: Record<string, WorkspaceEntry[]>;
@@ -15,6 +28,10 @@ interface WorkspaceSidebarProps {
   onToggleDirectory(path: string): void;
   onOpenFile(path: string): void;
   onOpenDiff(path: string): void;
+  terminalOpen: boolean;
+  onSelectTerminal(): void;
+  onCloseTerminal(): void;
+  onOpenSettings(): void;
 }
 
 const STATUS_LABEL: Record<WorkspaceChange["status"], string> = {
@@ -108,10 +125,14 @@ export function WorkspaceSidebar({
   onRefresh,
   onToggleDirectory,
   onOpenFile,
-  onOpenDiff
+  onOpenDiff,
+  terminalOpen,
+  onSelectTerminal,
+  onCloseTerminal,
+  onOpenSettings
 }: WorkspaceSidebarProps) {
   return (
-    <aside className="sidebar workspace-sidebar">
+    <aside className={"sidebar workspace-sidebar" + (terminalOpen ? " terminal-mode" : "")}>
       <section className="explorer-section">
         <div className="panel-heading">
           <span>Explorer</span>
@@ -121,6 +142,14 @@ export function WorkspaceSidebar({
                 ↻
               </button>
             )}
+            <button
+              className="icon-button"
+              type="button"
+              onClick={onOpenSettings}
+              title="Settings: model server, context/memory, git"
+            >
+              ⚙️
+            </button>
             <button className="icon-button" type="button" onClick={onOpenWorkspace} title="Open project">
               +
             </button>
@@ -156,11 +185,34 @@ export function WorkspaceSidebar({
       </section>
 
       <section className="changes-section">
-        <div className="panel-heading">
-          <span>Changes</span>
-          <span className="change-count">{changes.length}</span>
+        <div className="sidebar-mini-tabs" role="tablist" aria-label="Left panels">
+          <button
+            className={"mini-tab" + (!terminalOpen ? " active" : "")}
+            type="button"
+            role="tab"
+            aria-selected={!terminalOpen}
+            title="Show git changes (closes the terminal)"
+            onClick={() => {
+              if (terminalOpen) onCloseTerminal();
+            }}
+          >
+            Changes
+          </button>
+          <button
+            className={"mini-tab" + (terminalOpen ? " active" : "")}
+            type="button"
+            role="tab"
+            aria-selected={terminalOpen}
+            title="Show terminal (hides changes)"
+            onClick={() => {
+              if (!terminalOpen) onSelectTerminal();
+            }}
+          >
+            Terminal
+          </button>
         </div>
 
+        {!terminalOpen && (
         <div className="changes-list">
           {!workspace && <p className="sidebar-note">No workspace.</p>}
           {workspace && !workspace.gitRepository && (
@@ -179,12 +231,14 @@ export function WorkspaceSidebar({
             >
               <span className="change-status">{STATUS_LABEL[change.status]}</span>
               <span className="change-path">{change.path}</span>
+              <span className="change-time">{formatChangeTime(change.mtimeMs)}</span>
               <span className="change-stage">
                 {change.staged && change.unstaged ? "S/U" : change.staged ? "S" : ""}
               </span>
             </button>
           ))}
         </div>
+        )}
       </section>
     </aside>
   );

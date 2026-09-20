@@ -2,6 +2,7 @@ import type {
   DesktopPersistenceState,
   DesktopRuntimeSettings,
   DesktopUiState,
+  ModelTuning,
   RecentProject,
   WorkspaceDescriptor
 } from "@kripl/core";
@@ -125,6 +126,31 @@ function normalizeLastSessionByWorkspace(value: unknown): Record<string, string>
   return result;
 }
 
+const MAX_SYSTEM_PROMPT_LENGTH = 65_536;
+
+function normalizeModelTuning(value: unknown): ModelTuning | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+
+  const record = value as Record<string, unknown>;
+  const systemPrompt =
+    typeof record.systemPrompt === "string" && record.systemPrompt.trim()
+      ? record.systemPrompt.slice(0, MAX_SYSTEM_PROMPT_LENGTH)
+      : undefined;
+  const temperature =
+    typeof record.temperature === "number" &&
+    Number.isFinite(record.temperature) &&
+    record.temperature >= 0 &&
+    record.temperature <= 2
+      ? Math.round(record.temperature * 100) / 100
+      : undefined;
+
+  if (!systemPrompt && temperature === undefined) return undefined;
+  return {
+    ...(systemPrompt !== undefined ? { systemPrompt } : {}),
+    ...(temperature !== undefined ? { temperature } : {})
+  };
+}
+
 function normalizeRuntime(value: unknown): DesktopRuntimeSettings {
   const fallback = defaultState().runtime;
   if (!value || typeof value !== "object" || Array.isArray(value)) return fallback;
@@ -148,10 +174,13 @@ function normalizeRuntime(value: unknown): DesktopRuntimeSettings {
     permissions = clonePermissionPolicy(DEFAULT_PERMISSION_POLICY);
   }
 
+  const modelTuning = normalizeModelTuning(record.modelTuning);
+
   return {
     networkMode,
     modelRouting,
-    permissions
+    permissions,
+    ...(modelTuning ? { modelTuning } : {})
   };
 }
 
@@ -209,7 +238,10 @@ export class JsonDesktopStateStore {
       runtime: {
         networkMode: this.state.runtime.networkMode,
         modelRouting: this.state.runtime.modelRouting,
-        permissions: clonePermissionPolicy(this.state.runtime.permissions)
+        permissions: clonePermissionPolicy(this.state.runtime.permissions),
+        ...(this.state.runtime.modelTuning
+          ? { modelTuning: { ...this.state.runtime.modelTuning } }
+          : {})
       }
     };
   }

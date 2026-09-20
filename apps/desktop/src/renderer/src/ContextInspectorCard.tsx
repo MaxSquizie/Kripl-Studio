@@ -42,6 +42,8 @@ function eventTitle(event: RuntimeEvent): string {
       return "Tool";
     case "agent.interaction":
       return "Permission interaction";
+    case "agent.usage":
+      return "Token usage";
     case "agent.notification":
       return "Agent notification";
     case "agent.raw":
@@ -83,6 +85,10 @@ function eventDetail(event: RuntimeEvent): string {
       return event.name + " · " + event.phase;
     case "agent.interaction":
       return event.request.kind + " · " + event.request.title;
+    case "agent.usage": {
+      const context = (event.input ?? 0) + (event.cacheRead ?? 0);
+      return `ctx ≈ ${context} · out ${event.output ?? 0}`;
+    }
     case "agent.notification":
       return event.level + " · " + shortText(event.message);
     case "agent.raw":

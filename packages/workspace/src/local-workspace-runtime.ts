@@ -26,6 +26,7 @@ import {
   basename,
   extname,
   isAbsolute,
+  join,
   relative,
   resolve,
   sep
@@ -483,7 +484,26 @@ export class LocalWorkspaceRuntime implements WorkspaceRuntime {
       ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
       root
     );
-    return parsePorcelain(output);
+    const changes = parsePorcelain(output);
+
+    // Sort by modification time (newest first) so the list reads like a feed.
+    await Promise.all(
+      changes.map(async (change) => {
+        try {
+          const info = await stat(join(root, change.path));
+          change.mtimeMs = info.mtimeMs;
+        } catch {
+          // Deleted or vanished files simply sort last.
+        }
+      })
+    );
+
+    return changes.sort((left, right) => {
+      const leftTime = left.mtimeMs ?? Number.NEGATIVE_INFINITY;
+      const rightTime = right.mtimeMs ?? Number.NEGATIVE_INFINITY;
+      if (rightTime !== leftTime) return rightTime - leftTime;
+      return left.path.localeCompare(right.path);
+    });
   }
 
   async getDiff(path: string): Promise<WorkspaceDiff> {

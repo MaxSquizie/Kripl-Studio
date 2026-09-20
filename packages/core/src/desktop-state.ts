@@ -18,8 +18,20 @@ export interface DesktopUiState {
   expandedDirectories: string[];
 }
 
+/**
+ * Optional per-model generation tuning.
+ *
+ * - `systemPrompt` is appended to the agent's system prompt on every turn.
+ * - `temperature` overrides sampling temperature (0-2); absent = provider default.
+ */
+export interface ModelTuning {
+  systemPrompt?: string;
+  temperature?: number;
+}
+
 export interface DesktopRuntimeSettings extends RuntimePolicy {
   permissions: PermissionPolicy;
+  modelTuning?: ModelTuning;
 }
 
 export interface DesktopPersistenceState {

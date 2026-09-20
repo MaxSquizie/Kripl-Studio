@@ -57,7 +57,7 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     },
-    "npmRebuild": true,
+    "npmRebuild": false,
     "nativeRebuilder": "sequential",
     "asarUnpack": [
       "node_modules/node-pty/**"

@@ -5,6 +5,7 @@ export * from "./terminal-runtime.js";
 export * from "./browser-runtime.js";
 export * from "./agent-runtime.js";
 export * from "./events.js";
+export * from "./text-tool-call.js";
 export * from "./memory-runtime.js";
 export * from "./model-provider.js";
 export * from "./network-policy.js";

@@ -6,6 +6,14 @@ export const KRIPL_PI_PROVIDER = "kripl-local";
 export interface PiLocalModelConfig {
   baseUrl: string;
   modelId: string;
+  /**
+   * Declare image input support in the generated models.json so Pi can send
+   * attached images to vision-capable local models (e.g. Qwen3.8-27B).
+   * Defaults to true; set false for text-only endpoints.
+   */
+  supportsVision?: boolean;
+  /** Sampling temperature override (0-2). Absent = provider default. */
+  temperature?: number;
 }
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
@@ -65,8 +73,11 @@ export async function writePiLocalModelConfig(
           {
             id: modelId,
             name: modelId,
+            ...(config.temperature !== undefined
+              ? { samplingParams: { temperature: config.temperature } }
+              : {}),
             reasoning: false,
-            input: ["text"],
+            input: config.supportsVision === false ? ["text"] : ["text", "image"],
             cost: {
               input: 0,
               output: 0,

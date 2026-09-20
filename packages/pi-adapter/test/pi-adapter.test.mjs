@@ -10,12 +10,14 @@ import { createPiEnvironment } from "../dist/rpc-process.js";
 import { writePiBrowserTools } from "../dist/pi-browser-tools.js";
 import { writePiPermissionGate } from "../dist/pi-permission-gate.js";
 import { writePiWebTools } from "../dist/pi-web-tools.js";
+import { writePiTextToolBridge } from "../dist/pi-text-tools.js";
 
 import { normalizePiEvent } from "../dist/pi-event-normalizer.js";
 import {
   KRIPL_PI_PROVIDER,
   writePiLocalModelConfig
 } from "../dist/pi-local-config.js";
+import { writePiModelTuning } from "../dist/pi-model-tuning.js";
 
 async function loadPiExtensions(paths, cwd) {
   const packageEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
@@ -41,6 +43,52 @@ test("writes an isolated Pi provider config for the selected local model", async
     assert.equal(provider.apiKey, "kripl-local");
     assert.equal(provider.models[0].id, "qwen-local");
     assert.equal(provider.models[0].cost.input, 0);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("writes sampling temperature into the provider config only when set", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "kripl-pi-"));
+
+  try {
+    await writePiLocalModelConfig(directory, {
+      baseUrl: "http://127.0.0.1:1234/v1",
+      modelId: "qwen-local"
+    });
+    let document = JSON.parse(await readFile(join(directory, "models.json"), "utf8"));
+    assert.equal(document.providers[KRIPL_PI_PROVIDER].models[0].samplingParams, undefined);
+
+    await writePiLocalModelConfig(directory, {
+      baseUrl: "http://127.0.0.1:1234/v1",
+      modelId: "qwen-local",
+      temperature: 0.4
+    });
+    document = JSON.parse(await readFile(join(directory, "models.json"), "utf8"));
+    assert.deepEqual(document.providers[KRIPL_PI_PROVIDER].models[0].samplingParams, {
+      temperature: 0.4
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("writes the model tuning extension and settings file", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "kripl-pi-"));
+
+  try {
+    await writePiModelTuning(directory, { systemPrompt: "Answer in Russian." });
+
+    const file = JSON.parse(await readFile(join(directory, "kripl-model-tuning.json"), "utf8"));
+    assert.equal(file.version, 1);
+    assert.equal(file.systemPrompt, "Answer in Russian.");
+    const source = await readFile(join(directory, "extensions", "kripl-model-tuning.ts"), "utf8");
+    assert.match(source, /before_agent_start/);
+
+    // No prompt: the file stays valid but carries no instructions.
+    await writePiModelTuning(directory, {});
+    const cleared = JSON.parse(await readFile(join(directory, "kripl-model-tuning.json"), "utf8"));
+    assert.equal(cleared.systemPrompt, undefined);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -400,6 +448,30 @@ test("browser tools reject offline mode before requiring the bridge", async () =
     else process.env.KRIPL_TOOL_BRIDGE_URL = previousUrl;
     if (previousToken === undefined) delete process.env.KRIPL_TOOL_BRIDGE_TOKEN;
     else process.env.KRIPL_TOOL_BRIDGE_TOKEN = previousToken;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("writes a text tool bridge that compiles and registers message_end", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "kripl-text-tools-"));
+
+  try {
+    await writePiTextToolBridge(directory);
+    const source = await readFile(
+      join(directory, "extensions", "kripl-text-tools.ts"),
+      "utf8"
+    );
+    assert.match(source, /pi\.on\("message_end"/);
+
+    const result = await loadPiExtensions(
+      [join(directory, "extensions", "kripl-text-tools.ts")],
+      directory
+    );
+
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.extensions.length, 1);
+    assert.ok(result.extensions[0]?.handlers.has("message_end"));
+  } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });

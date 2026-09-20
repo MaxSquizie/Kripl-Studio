@@ -24,6 +24,8 @@ export interface AgentRuntime {
   stop(): Promise<void>;
   respondToInteraction(response: AgentInteractionResponse): Promise<void>;
   getSessionSnapshot(): Promise<AgentSessionSnapshot>;
+  /** Optional: rename the live session (e.g. Pi's set_session_name). */
+  setSessionName?(name: string): Promise<void>;
   dispose(): Promise<void>;
   subscribe(listener: AgentEventListener): Unsubscribe;
 }

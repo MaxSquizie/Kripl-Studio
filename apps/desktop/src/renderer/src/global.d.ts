@@ -1,4 +1,9 @@
-import type { AgentEvent, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
+import type { AgentEvent, AttachedFile, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
+
+declare module "*.png" {
+  const src: string;
+  export default src;
+}
 
 export {};
 
@@ -17,6 +22,10 @@ declare global {
         networkMode: "online" | "restricted" | "offline";
         modelRouting: "local-only" | "allow-remote";
       }>;
+      minimizeWindow(): Promise<void>;
+      toggleMaximizeWindow(): Promise<void>;
+      closeWindow(): Promise<void>;
+      onWindowMaximized(listener: (maximized: boolean) => void): () => void;
       getDesktopBootstrap(): Promise<DesktopBootstrapState>;
       pickWorkspace(): Promise<WorkspaceDescriptor | null>;
       openRecentProject(path: string): Promise<WorkspaceDescriptor>;
@@ -52,6 +61,8 @@ declare global {
         error?: string;
       }>;
       listAgentSessions(): Promise<AgentSessionSummary[]>;
+      renameAgentSession(sessionPath: string, name: string): Promise<ActionResult>;
+      onAgentSessionsChanged(listener: () => void): () => void;
       startAgent(request: {
         endpoint: string;
         modelId: string;
@@ -59,12 +70,32 @@ declare global {
       }): Promise<ActionResult>;
       getAgentSessionSnapshot(): Promise<AgentSessionSnapshot | null>;
       sendAgentMessage(message: string): Promise<ActionResult>;
+      pickAttachFiles(): Promise<string[]>;
+      attachAgentFiles(paths: string[]): Promise<{
+        ok: boolean;
+        error?: string;
+        files?: AttachedFile[];
+      }>;
+      pasteAgentFiles(items: Array<{ name?: string; dataBase64?: string }>): Promise<{
+        ok: boolean;
+        error?: string;
+        files?: AttachedFile[];
+      }>;
+      readAttachPreview(path: string): Promise<{
+        ok: boolean;
+        error?: string;
+        mime?: string;
+        dataUrl?: string;
+      }>;
       abortAgent(): Promise<ActionResult>;
       stopAgent(): Promise<ActionResult>;
       respondToAgentInteraction(response: AgentInteractionResponse): Promise<ActionResult>;
       getBrowserState(): Promise<BrowserState>;
       setBrowserVisible(visible: boolean): Promise<BrowserState>;
+      navigateBrowser(url: string): Promise<BrowserState>;
+      getBrowserHistory(): Promise<BrowserHistoryEntry[]>;
       onBrowserState(listener: (state: BrowserState) => void): () => void;
+      onBrowserHistory(listener: (entries: BrowserHistoryEntry[]) => void): () => void;
       getTerminalState(): Promise<TerminalSessionInfo | null>;
       startTerminal(size?: { cols?: number; rows?: number }): Promise<TerminalSessionInfo>;
       writeTerminal(data: string): Promise<void>;

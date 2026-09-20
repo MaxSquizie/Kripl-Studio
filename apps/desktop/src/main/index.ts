@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
+import type { AgentEvent, AttachedFile, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
 import { JsonDesktopStateStore } from "@kripl/app-state";
 import { InspectableContextRuntime } from "@kripl/context-runtime";
 import { LocalOpenAIProvider } from "@kripl/local-openai-provider";
@@ -7,8 +7,8 @@ import { PiAgentRuntime, PiSessionCatalog } from "@kripl/pi-adapter";
 import { PtyTerminalRuntime } from "@kripl/terminal";
 import { LocalWorkspaceRuntime } from "@kripl/workspace";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
-import { stat } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserRuntime } from "./browser-runtime.js";
 import { ToolBridgeServer } from "./tool-bridge.js";
@@ -43,6 +43,10 @@ const IPC = {
   agentStart: "kripl:agent-start",
   agentSessionSnapshot: "kripl:agent-session-snapshot",
   agentSend: "kripl:agent-send",
+  pickAttachFiles: "kripl:pick-attach-files",
+  agentAttachFiles: "kripl:agent-attach-files",
+  pasteAgentFiles: "kripl:paste-agent-files",
+  attachPreview: "kripl:attach-preview",
   agentAbort: "kripl:agent-abort",
   agentStop: "kripl:agent-stop",
   agentRespondInteraction: "kripl:agent-respond-interaction",
@@ -50,6 +54,11 @@ const IPC = {
   browserGetState: "kripl:browser-get-state",
   browserSetVisible: "kripl:browser-set-visible",
   browserState: "kripl:browser-state",
+  browserGetHistory: "kripl:browser-get-history",
+  browserNavigate: "kripl:browser-navigate",
+  browserHistory: "kripl:browser-history",
+  agentRenameSession: "kripl:agent-rename-session",
+  agentSessionsChanged: "kripl:agent-sessions-changed",
   terminalGetState: "kripl:terminal-get-state",
   terminalStart: "kripl:terminal-start",
   terminalWrite: "kripl:terminal-write",
@@ -73,6 +82,7 @@ interface ActionResult {
 let activeAgent: PiAgentRuntime | undefined;
 let activeAgentUnsubscribe: (() => void) | undefined;
 let activeAgentStatus: AgentStatus = "idle";
+let activeAgentModel: { endpoint: string; modelId: string } | undefined;
 let browserRuntime: BrowserRuntime | undefined;
 let toolBridgeServer: ToolBridgeServer | undefined;
 let browserUnsubscribe: (() => void) | undefined;
@@ -148,10 +158,6 @@ function pathKey(path: string): string {
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;
 }
 
-async function listWorkspaceSessions(workspacePath: string): Promise<AgentSessionSummary[]> {
-  return new PiSessionCatalog(piSessionDir()).list(workspacePath);
-}
-
 async function validatedSessionPath(
   workspacePath: string,
   requestedPath: string | undefined
@@ -166,6 +172,166 @@ async function validatedSessionPath(
     throw new Error("Selected Pi session does not belong to the active workspace.");
   }
   return matched.path;
+}
+
+function broadcastToWindow(channel: string, payload: unknown): void {
+  const window = BrowserWindow.getAllWindows()[0];
+  if (window && !window.webContents.isDestroyed()) {
+    window.webContents.send(channel, payload);
+  }
+}
+
+// --- Browser usage history (persisted, best-effort) -------------------------
+
+function browserHistoryPath(): string {
+  return join(app.getPath("userData"), "browser-history.json");
+}
+
+async function loadBrowserHistory(): Promise<BrowserHistoryEntry[]> {
+  try {
+    const parsed = JSON.parse(await readFile(browserHistoryPath(), "utf8")) as {
+      version?: unknown;
+      entries?: unknown;
+    };
+    if (!Array.isArray(parsed.entries)) return [];
+    return (parsed.entries as Array<Record<string, unknown>>)
+      .filter(
+        (item) =>
+          item && typeof item.url === "string" && typeof item.at === "number"
+      )
+      .map((item) => ({
+        url: item.url as string,
+        title: typeof item.title === "string" ? item.title : "",
+        at: item.at as number
+      }))
+      .slice(0, 10);
+  } catch {
+    return [];
+  }
+}
+
+let lastRecordedBrowserUrl = "";
+
+async function recordBrowserUsage(state: BrowserState): Promise<void> {
+  if (!state.url || state.url === "about:blank" || state.url === lastRecordedBrowserUrl) return;
+  lastRecordedBrowserUrl = state.url;
+  const entries = await loadBrowserHistory();
+  const next = [
+    { url: state.url, title: state.title, at: Date.now() },
+    ...entries.filter((entry) => entry.url !== state.url)
+  ].slice(0, 10);
+  try {
+    await writeFile(browserHistoryPath(), JSON.stringify({ version: 1, entries: next }), "utf8");
+  } catch {
+    // History is best-effort and must not break the browser.
+  }
+  broadcastToWindow(IPC.browserHistory, next);
+}
+
+// --- Session names (sidecar store; Pi's own name wins when present) --------
+
+function sessionNamesPath(): string {
+  return join(app.getPath("userData"), "session-names.json");
+}
+
+async function loadSessionNames(): Promise<Record<string, string>> {
+  try {
+    const parsed = JSON.parse(await readFile(sessionNamesPath(), "utf8")) as { names?: unknown };
+    if (!parsed.names || typeof parsed.names !== "object" || Array.isArray(parsed.names)) return {};
+    const result: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed.names as Record<string, unknown>)) {
+      if (typeof value === "string" && value.trim()) result[key] = value.trim();
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+async function saveSessionNames(names: Record<string, string>): Promise<void> {
+  await writeFile(sessionNamesPath(), JSON.stringify({ version: 1, names }), "utf8");
+}
+
+async function listWorkspaceSessions(workspacePath: string): Promise<AgentSessionSummary[]> {
+  const [sessions, names] = await Promise.all([
+    new PiSessionCatalog(piSessionDir()).list(workspacePath),
+    loadSessionNames()
+  ]);
+  return sessions.map((session) => {
+    const custom = names[pathKey(session.path)];
+    return custom ? { ...session, name: custom } : session;
+  });
+}
+
+async function generateSessionTitle(
+  model: { endpoint: string; modelId: string },
+  firstMessage: string
+): Promise<string | undefined> {
+  try {
+    const response = await fetch(`${model.endpoint}/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model: model.modelId,
+        max_tokens: 24,
+        temperature: 0,
+        messages: [
+          {
+            role: "user",
+            content:
+              "Create a very short topic title (maximum 5 words) for a coding chat that starts with this request. Reply with the title only, without quotes or punctuation at the end.\n\nRequest:\n" +
+              firstMessage.slice(0, 600)
+          }
+        ]
+      }),
+      signal: AbortSignal.timeout(15_000)
+    });
+    if (!response.ok) return undefined;
+    const payload = (await response.json()) as {
+      choices?: Array<{ message?: { content?: unknown } }>;
+    };
+    const raw = payload.choices?.[0]?.message?.content;
+    const title =
+      typeof raw === "string"
+        ? raw.replace(/^[\"'\u201c\u201d\s]+|[\"'\u201c\u201d.!?\s]+$/g, "").trim().slice(0, 80)
+        : undefined;
+    return title || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function autoNameActiveSession(): Promise<void> {
+  const agent = activeAgent;
+  const model = activeAgentModel;
+  if (!agent || !model) return;
+
+  try {
+    const snapshot = await agent.getSessionSnapshot();
+    const sessionFile = snapshot.sessionFile;
+    if (!sessionFile) return;
+
+    const names = await loadSessionNames();
+    if (names[pathKey(sessionFile)]) return; // already named (custom or auto)
+
+    const firstUser = snapshot.messages.find((message) => message.role === "user");
+    const text = firstUser?.text ?? "";
+    if (!text.trim()) return;
+
+    const title = await generateSessionTitle(model, text);
+    if (!title) return;
+
+    names[pathKey(sessionFile)] = title;
+    await saveSessionNames(names).catch(() => {});
+    try {
+      await agent.setSessionName?.(title);
+    } catch {
+      // Pi sync is best-effort; the sidecar store already has the name.
+    }
+    broadcastToWindow(IPC.agentSessionsChanged, undefined);
+  } catch {
+    // Auto-naming must never break the agent run.
+  }
 }
 
 async function rememberActiveAgentSession(): Promise<void> {
@@ -214,10 +380,37 @@ function parseDesktopRuntimeSettings(value: unknown): DesktopRuntimeSettings {
     throw new Error("Only local model routing is currently supported.");
   }
 
+  const tuning = record.modelTuning as Record<string, unknown> | undefined;
+  if (
+    tuning &&
+    typeof tuning === "object" &&
+    !Array.isArray(tuning) &&
+    ((tuning.systemPrompt !== undefined && (typeof tuning.systemPrompt !== "string" || tuning.systemPrompt.length > 65_536)) ||
+      (tuning.temperature !== undefined &&
+        (typeof tuning.temperature !== "number" ||
+          !Number.isFinite(tuning.temperature) ||
+          tuning.temperature < 0 ||
+          tuning.temperature > 2)))
+  ) {
+    throw new Error("Invalid model tuning settings.");
+  }
+
+  const systemPrompt =
+    tuning && typeof tuning.systemPrompt === "string" && tuning.systemPrompt.trim()
+      ? tuning.systemPrompt
+      : undefined;
+  const temperature =
+    tuning && typeof tuning.temperature === "number" && Number.isFinite(tuning.temperature)
+      ? Math.round(tuning.temperature * 100) / 100
+      : undefined;
+
   return {
     networkMode: record.networkMode,
     modelRouting: "local-only",
-    permissions: parsePermissionPolicy(record.permissions)
+    permissions: parsePermissionPolicy(record.permissions),
+    ...(systemPrompt !== undefined || temperature !== undefined
+      ? { modelTuning: { ...(systemPrompt !== undefined ? { systemPrompt } : {}), ...(temperature !== undefined ? { temperature } : {}) } }
+      : {})
   };
 }
 
@@ -306,6 +499,7 @@ async function disposeActiveAgent(): Promise<void> {
     await rememberActiveAgentSession();
   }
   activeAgent = undefined;
+  activeAgentModel = undefined;
   activeAgentUnsubscribe?.();
   activeAgentUnsubscribe = undefined;
   activeAgentStatus = "stopped";
@@ -370,6 +564,7 @@ async function initializeBrowserRuntime(window: BrowserWindow): Promise<void> {
   toolBridgeServer = bridge;
   browserUnsubscribe = runtime.subscribe((state) => {
     recordBrowserState(state);
+    void recordBrowserUsage(state);
     if (!window.webContents.isDestroyed()) {
       window.webContents.send(IPC.browserState, state);
     }
@@ -384,6 +579,7 @@ function createWindow(): BrowserWindow {
     minHeight: 680,
     backgroundColor: "#0d1014",
     title: "Kripl Studio",
+    frame: false,
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(currentDir, "../preload/index.cjs"),
@@ -400,6 +596,30 @@ function createWindow(): BrowserWindow {
   }
 
   return window;
+}
+
+// --- Window controls (frameless titlebar) -----------------------------------
+
+const IPC_WINDOW = {
+  minimize: "kripl:window-minimize",
+  toggleMaximize: "kripl:window-toggle-maximize",
+  close: "kripl:window-close",
+  maximized: "kripl:window-maximized"
+} as const;
+
+function registerWindowControls(window: BrowserWindow): void {
+  ipcMain.handle(IPC_WINDOW.minimize, () => window.minimize());
+  ipcMain.handle(IPC_WINDOW.toggleMaximize, () => {
+    if (window.isMaximized()) window.unmaximize();
+    else window.maximize();
+  });
+  ipcMain.handle(IPC_WINDOW.close, () => window.close());
+
+  const sendState = (maximized: boolean): void => {
+    if (!window.isDestroyed()) window.webContents.send(IPC_WINDOW.maximized, maximized);
+  };
+  window.on("maximize", () => sendState(true));
+  window.on("unmaximize", () => sendState(false));
 }
 
 function registerIpc(): void {
@@ -702,17 +922,27 @@ function registerIpc(): void {
         sessionDir: piSessionDir(),
         localModel: {
           baseUrl: localModel.endpoint,
-          modelId: localModel.modelId
+          modelId: localModel.modelId,
+          ...(runtimeSettings.modelTuning?.temperature !== undefined
+            ? { temperature: runtimeSettings.modelTuning.temperature }
+            : {})
         },
+        ...(runtimeSettings.modelTuning?.systemPrompt
+          ? { modelSystemPrompt: runtimeSettings.modelTuning.systemPrompt }
+          : {}),
         networkMode: runtimeSettings.networkMode,
         permissionPolicy,
         toolBridge
       });
 
       activeAgent = agent;
+      activeAgentModel = { endpoint: localModel.endpoint, modelId: localModel.modelId };
       activeAgentStatus = "starting";
       activeAgentUnsubscribe = agent.subscribe((agentEvent) => {
         forwardAgentEvent(event.sender, agentEvent);
+        if (agentEvent.type === "agent.turn" && agentEvent.phase === "completed") {
+          void autoNameActiveSession();
+        }
       });
 
       await agent.start({
@@ -751,6 +981,204 @@ function registerIpc(): void {
       return actionError(error);
     }
   });
+
+  const ATTACH_IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"]);
+  const ATTACH_ARCHIVE_EXTS = new Set([".zip", ".rar", ".7z", ".tar", ".gz", ".tgz", ".bz2", ".xz"]);
+  const ATTACH_TEXT_EXTS = new Set([
+    ".txt", ".md", ".json", ".jsonl", ".csv", ".tsv", ".log",
+    ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".",
+    ".py", ".kt", ".kts", ".java", ".c", ".h", ".cpp", ".hpp", ".cs",
+    ".rs", ".go", ".rb", ".php", ".sh", ".bat", ".ps1", ".yml", ".yaml",
+    ".toml", ".ini", ".xml", ".html", ".css", ".scss", ".sql", ".tex"
+  ]);
+
+  function classifyAttachment(name: string): "image" | "archive" | "text" | "binary" {
+    const ext = name.slice(name.lastIndexOf(".")).toLowerCase();
+    if (ATTACH_IMAGE_EXTS.has(ext)) return "image";
+    if (ATTACH_ARCHIVE_EXTS.has(ext)) return "archive";
+    if (ATTACH_TEXT_EXTS.has(ext)) return "text";
+    return "binary";
+  }
+
+  ipcMain.handle(IPC.pickAttachFiles, async (event): Promise<string[]> => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    const result = await dialog.showOpenDialog(window!, {
+      title: "Attach files to the chat",
+      properties: ["openFile", "multiSelections"]
+    });
+    return result.canceled ? [] : result.filePaths;
+  });
+
+  ipcMain.handle(
+    IPC.agentAttachFiles,
+    async (_event, paths: unknown): Promise<ActionResult & { files?: AttachedFile[] }> => {
+      if (!Array.isArray(paths) || paths.length === 0 || paths.length > 10) {
+        return { ok: false, error: "Select between 1 and 10 files." };
+      }
+
+      const workspace = workspaceRuntime.descriptor();
+      const destDir = workspace
+        ? join(workspace.path, ".kripl", "attachments")
+        : join(app.getPath("userData"), "attachments");
+      await mkdir(destDir, { recursive: true });
+
+      const files: AttachedFile[] = [];
+      for (const value of paths) {
+        if (typeof value !== "string" || !value.trim()) continue;
+        const source = resolve(value);
+        try {
+          const info = await stat(source);
+          if (!info.isFile() || info.size > 50 * 1024 * 1024) {
+            files.push({
+              name: source.slice(source.lastIndexOf("\\") + 1),
+              path: source,
+              sizeBytes: info.size,
+              kind: classifyAttachment(source),
+              error: "File is not a regular file or exceeds 50 MB."
+            });
+            continue;
+          }
+
+          const baseName = source.slice(source.lastIndexOf("\\") + 1);
+          const destPath = join(destDir, `${Date.now()}-${files.length}-${baseName}`);
+          await copyFile(source, destPath);
+
+          const file: AttachedFile = {
+            name: baseName,
+            path: destPath,
+            sizeBytes: info.size,
+            kind: classifyAttachment(baseName)
+          };
+          if (file.kind === "text" && info.size <= 200_000) {
+            const content = await readFile(destPath, "utf8");
+            file.preview =
+              content.length > 100_000 ? content.slice(0, 100_000) + "\n…[truncated]" : content;
+          }
+          files.push(file);
+        } catch (error) {
+          files.push({
+            name: source,
+            path: source,
+            sizeBytes: 0,
+            kind: "binary",
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      }
+
+      return { ok: true, files };
+    }
+  );
+
+  ipcMain.handle(
+    IPC.pasteAgentFiles,
+    async (_event, items: unknown): Promise<ActionResult & { files?: AttachedFile[] }> => {
+      if (!Array.isArray(items) || items.length === 0 || items.length > 10) {
+        return { ok: false, error: "Paste between 1 and 10 files." };
+      }
+
+      const workspace = workspaceRuntime.descriptor();
+      const destDir = workspace
+        ? join(workspace.path, ".kripl", "attachments")
+        : join(app.getPath("userData"), "attachments");
+      await mkdir(destDir, { recursive: true });
+
+      const files: AttachedFile[] = [];
+      for (const value of items) {
+        if (!value || typeof value !== "object") continue;
+        const record = value as Record<string, unknown>;
+        const rawName = typeof record.name === "string" && record.name.trim()
+          ? record.name
+          : `pasted-${Date.now()}`;
+        const safeName = rawName.replace(/^[^\\\/]*[\\\//]/, "").replace(/[\\/:*?"<>|]/g, "_");
+
+        try {
+          if (typeof record.dataBase64 !== "string") throw new Error("No clipboard payload.");
+          const data = Buffer.from(record.dataBase64, "base64");
+          if (data.byteLength === 0 || data.byteLength > 50 * 1024 * 1024) {
+            throw new Error("Clipboard payload is empty or exceeds 50 MB.");
+          }
+
+          const destPath = join(destDir, `${Date.now()}-${files.length}-${safeName}`);
+          await writeFile(destPath, data);
+
+          const file: AttachedFile = {
+            name: safeName,
+            path: destPath,
+            sizeBytes: data.byteLength,
+            kind: classifyAttachment(safeName)
+          };
+          if (file.kind === "text" && data.byteLength <= 200_000) {
+            const content = await readFile(destPath, "utf8");
+            file.preview =
+              content.length > 100_000 ? content.slice(0, 100_000) + "\n…[truncated]" : content;
+          }
+          files.push(file);
+        } catch (error) {
+          files.push({
+            name: safeName,
+            path: "",
+            sizeBytes: 0,
+            kind: "binary",
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      }
+
+      return { ok: true, files };
+    }
+  );
+
+  const ATTACH_PREVIEW_MIME: Record<string, string> = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".svg": "image/svg+xml",
+    ".pdf": "application/pdf"
+  };
+
+  ipcMain.handle(
+    IPC.attachPreview,
+    async (_event, path: unknown): Promise<ActionResult & { mime?: string; dataUrl?: string }> => {
+      if (typeof path !== "string" || !path.trim()) {
+        return { ok: false, error: "Invalid attachment path." };
+      }
+
+      // Previews are only served for files inside the Kripl attachment store.
+      const allowedDirs = [join(app.getPath("userData"), "attachments")];
+      const workspace = workspaceRuntime.descriptor();
+      if (workspace) allowedDirs.push(join(workspace.path, ".kripl", "attachments"));
+
+      const resolved = resolve(path);
+      const insideStore = allowedDirs.some((dir) => {
+        const rel = relative(dir, resolved);
+        return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+      });
+      if (!insideStore) {
+        return { ok: false, error: "Path is outside the attachment store." };
+      }
+
+      const ext = resolved.slice(resolved.lastIndexOf(".")).toLowerCase();
+      const mime = ATTACH_PREVIEW_MIME[ext];
+      if (!mime) {
+        return { ok: false, error: "No preview available for this file type." };
+      }
+
+      try {
+        const info = await stat(resolved);
+        if (info.size > 10 * 1024 * 1024) {
+          return { ok: false, error: "File exceeds the 10 MB preview limit." };
+        }
+        const data = await readFile(resolved);
+        return { ok: true, mime, dataUrl: `data:${mime};base64,${data.toString("base64")}` };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+  );
 
   ipcMain.handle(IPC.agentAbort, async (): Promise<ActionResult> => {
     if (!activeAgent) return { ok: true };
@@ -875,8 +1303,76 @@ function registerIpc(): void {
     browserRuntime?.setBottomInset(visible ? 260 : 0);
   });
 
+  ipcMain.handle(IPC.browserGetHistory, async (): Promise<BrowserHistoryEntry[]> => {
+    return loadBrowserHistory();
+  });
+
+  ipcMain.handle(
+    IPC.agentRenameSession,
+    async (_event, request: unknown): Promise<ActionResult> => {
+      if (
+        !request ||
+        typeof request !== "object" ||
+        typeof (request as Record<string, unknown>).sessionPath !== "string"
+      ) {
+        return { ok: false, error: "Invalid rename request." };
+      }
+
+      const sessionPath = (request as Record<string, unknown>).sessionPath as string;
+      const name =
+        typeof (request as Record<string, unknown>).name === "string"
+          ? ((request as Record<string, unknown>).name as string).trim()
+          : "";
+
+      if (sessionPath.length > 32_768 || name.length > 120) {
+        return { ok: false, error: "Session path or name is too long." };
+      }
+
+      try {
+        const workspace = workspaceRuntime.descriptor();
+        if (!workspace) throw new Error("Open a workspace first.");
+
+        const sessions = await listWorkspaceSessions(workspace.path);
+        const matched = sessions.find((session) => pathKey(session.path) === pathKey(sessionPath));
+        if (!matched) {
+          throw new Error("Selected Pi session does not belong to the active workspace.");
+        }
+
+        const names = await loadSessionNames();
+        const key = pathKey(matched.path);
+        if (name) names[key] = name;
+        else delete names[key];
+        await saveSessionNames(names);
+
+        // Keep Pi's own session selector in sync for the live session.
+        try {
+          const agent = activeAgent;
+          if (agent?.setSessionName) {
+            const snapshot = await agent.getSessionSnapshot();
+            if (snapshot.sessionFile && pathKey(snapshot.sessionFile) === key) {
+              if (name) await agent.setSessionName(name);
+            }
+          }
+        } catch {
+          // Pi sync is best-effort; the sidecar store already has the name.
+        }
+
+        broadcastToWindow(IPC.agentSessionsChanged, undefined);
+        return { ok: true };
+      } catch (error) {
+        return actionError(error);
+      }
+    }
+  );
+
   ipcMain.handle(IPC.browserGetState, (): BrowserState => {
     return browserRuntime?.getState() ?? emptyBrowserState();
+  });
+
+  ipcMain.handle(IPC.browserNavigate, async (_event, url: unknown): Promise<BrowserState> => {
+    const runtime = browserRuntime;
+    if (!runtime) throw new Error("Browser is not initialized.");
+    return runtime.navigate(typeof url === "string" ? url : "");
   });
 
   ipcMain.handle(IPC.browserSetVisible, (_event, visible: unknown): BrowserState => {
@@ -905,6 +1401,7 @@ void app.whenReady().then(async () => {
 
   registerIpc();
   const window = createWindow();
+  registerWindowControls(window);
   await initializeBrowserRuntime(window);
   initializeTerminalForwarding(window);
   initializeContextForwarding(window);
@@ -912,6 +1409,7 @@ void app.whenReady().then(async () => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       const nextWindow = createWindow();
+      registerWindowControls(nextWindow);
       void initializeBrowserRuntime(nextWindow);
       initializeTerminalForwarding(nextWindow);
       initializeContextForwarding(nextWindow);

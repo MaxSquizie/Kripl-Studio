@@ -14,16 +14,23 @@
   padding: 14px 16px;
 }
 
+/* Bubbles hug the edges; each keeps one sharp bottom corner. */
 .chat-message.user {
-  margin-left: min(12%, 90px);
+  margin-left: min(3%, 22px);
+  border-bottom-right-radius: 0;
   background: #171d27;
 }
 
 .chat-message.assistant {
-  margin-right: min(8%, 60px);
+  margin-right: min(3%, 22px);
+  border-bottom-left-radius: 0;
 }
 
 .message-role {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   color: #778394;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -31,13 +38,147 @@
   font-weight: 700;
 }
 
-.message-text,
-.thinking-card > div {
+.message-tokps {
+  color: #5f7a6e;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* Collapsible reasoning inside the agent bubble. */
+.reasoning {
+  margin-top: -2px;
+}
+
+.reasoning summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: #6b7686;
+  font-size: 10.5px;
+  user-select: none;
+  list-style: none;
+}
+
+.reasoning summary::-webkit-details-marker {
+  display: none;
+}
+
+.reasoning-preview {
+  flex: 1;
+  min-width: 0;
+  color: #4f5a68;
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chevrons {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: #5b6673;
+}
+
+.chevron-up {
+  display: none;
+}
+
+details[open] > summary .chevron-down,
+details[open] .reasoning .chevron-down {
+  display: none;
+}
+
+details[open] .chevrons .chevron-up {
+  display: inline;
+}
+
+.reasoning-body {
+  margin-top: 6px;
+  padding-left: 10px;
+  border-left: 2px solid #233029;
+  color: #9aa5b1;
+  font-size: 12px;
+  line-height: 1.5;
+  display: grid;
+  gap: 4px;
+}
+
+/* Smooth expand when the reasoning block opens. */
+.reasoning[open] .reasoning-body {
+  animation: details-expand 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes details-expand {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.reasoning-tool {
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11.5px;
+  color: #7d8996;
+}
+
+.reasoning-tool.completed {
+  color: #8fc69c;
+}
+
+.reasoning-tool.failed {
+  color: #d9878c;
+}
+
+.reasoning-tool summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.reasoning-tool summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Payload preview revealed when a tool row is expanded. */
+.reasoning-tool pre {
+  margin: 4px 0 2px;
+  padding: 6px 8px;
+  border-left: 2px solid #233029;
+  border-radius: 4px;
+  background: #0f141a;
+  color: #9aa5b1;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.message-text {
   color: #d1d7df;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.58;
   font-size: 13px;
+}
+
+.thinking-card > div {
+  color: #d1d7df;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+  font-size: 12px;
 }
 
 .thinking-card,
@@ -226,4 +367,451 @@
   border-color: #4f806f;
   background: #173027;
   color: #bdd8cf;
+}
+
+/* Markdown rendering inside chat messages and reasoning */
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p {
+  margin: 0 0 8px;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  margin: 12px 0 6px;
+  line-height: 1.3;
+}
+
+.markdown h1 {
+  font-size: 15px;
+}
+
+.markdown h2 {
+  font-size: 14px;
+}
+
+.markdown h3 {
+  font-size: 13px;
+}
+
+.markdown ul,
+.markdown ol {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.markdown li {
+  margin-bottom: 3px;
+}
+
+.markdown code {
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  background: #1a212b;
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.markdown pre {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  background: #0b0f14;
+  border: 1px solid #232a33;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.markdown pre code {
+  background: none;
+  padding: 0;
+  font-size: 12px;
+}
+
+.markdown blockquote {
+  margin: 0 0 8px;
+  padding-left: 10px;
+  border-left: 3px solid #2c3644;
+  color: #9aa5b3;
+}
+
+.markdown a {
+  color: #7fb0d9;
+  text-decoration: none;
+}
+
+.markdown a:hover {
+  text-decoration: underline;
+}
+
+.markdown hr {
+  margin: 10px 0;
+  border: none;
+  border-top: 1px solid #252d37;
+}
+
+/* Attachments */
+.attach-chips {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.attach-chip {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid #2c3a4d;
+  border-radius: 999px;
+  background: #151b24;
+  padding: 3px 6px 3px 10px;
+  font-size: 11.5px;
+  color: #b8c2cf;
+  max-width: 320px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.attach-chip.error {
+  border-color: #503236;
+  color: #dfa7aa;
+}
+
+.attach-chip.attach-image {
+  cursor: zoom-in;
+  position: relative;
+  display: inline-block;
+  padding: 2px;
+  border: 1px solid #4a5568;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* Small × in the top-right corner, visible only while hovering the image. */
+.attach-image-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 1;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 0;
+  background: rgba(13, 16, 20, 0.78);
+  color: #e0a7ad;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+
+.attach-image-remove:hover {
+  background: rgba(13, 16, 20, 0.95);
+  color: #ffffff;
+}
+
+.attach-chip.attach-image:hover .attach-image-remove {
+  display: inline-flex;
+}
+
+.attach-chip-thumb {
+  display: block;
+  width: 96px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 0;
+  flex-shrink: 0;
+}
+
+.attach-chip-pdf {
+  border: none;
+  background: #1d2735;
+  color: #9fb6d0;
+  font-size: 10.5px;
+  line-height: 16px;
+  border-radius: 999px;
+  padding: 0 8px;
+}
+
+.attach-chip-pdf:hover {
+  color: #cfe0f2;
+}
+
+.attach-pdf-frame {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 380px;
+  border: 1px solid #4a5568;
+  border-radius: 0;
+  background: #ffffff;
+}
+
+/* Attached images rendered inside chat messages. Click opens the lightbox. */
+.message-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.message-image-button {
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: zoom-in;
+  line-height: 0;
+}
+
+.message-images img {
+  max-width: 480px;
+  max-height: 360px;
+  width: auto;
+  height: auto;
+  border: 1px solid #4a5568;
+  border-radius: 0;
+}
+
+.message-image-button:hover img {
+  border-color: var(--kripl-accent);
+}
+
+/* Full-size overlay for inspecting an attached image. */
+.image-lightbox {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  background: rgba(8, 11, 15, 0.88);
+  cursor: zoom-out;
+  animation: lightbox-fade 0.18s ease;
+}
+
+.image-lightbox img {
+  max-width: 94%;
+  max-height: 92%;
+  width: auto;
+  height: auto;
+  border: 1px solid #4a5568;
+}
+
+@keyframes lightbox-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.attach-chip-remove {
+  border: none;
+  background: transparent;
+  color: #778394;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 4px;
+  align-self: stretch;
+}
+
+.attach-chip-remove:hover {
+  color: #e0a7ad;
+}
+
+.composer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.drop-overlay {
+  position: absolute;
+  inset: 12px;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  border: 2px dashed #4f806f;
+  border-radius: 12px;
+  background: rgba(23, 48, 39, 0.85);
+  color: #bdd8cf;
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.agent-column {
+  position: relative;
+}
+
+/* Pointer cursor for all interactive elements */
+button:not(:disabled),
+select:not(:disabled) {
+  cursor: pointer;
+}
+
+summary {
+  cursor: pointer;
+}
+
+/* Left composer column: token ring on top, paperclip below it */
+/* Bottom composer bar: check + slider on the left, ring + clip + send on the right. */
+.composer-bottom {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.composer-bottom-spacer {
+  flex: 1;
+}
+
+/* Green paperclip (file attach), drawn as an icon. */
+.composer .attach-button {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--kripl-accent);
+  cursor: pointer;
+  padding: 0;
+}
+
+.composer .attach-button:hover {
+  background: rgba(63, 143, 116, 0.12);
+}
+
+/* Circular send / stop button with an up-arrow icon. */
+.send-button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--kripl-accent);
+  border-radius: 50%;
+  background: rgba(63, 143, 116, 0.16);
+  color: #58c29a;
+  cursor: pointer;
+  padding: 0;
+}
+
+.send-button:hover:not(:disabled) {
+  background: rgba(63, 143, 116, 0.28);
+}
+
+.send-button.stop {
+  border-color: #7a4444;
+  background: rgba(160, 70, 70, 0.14);
+  color: #d08080;
+}
+
+.send-button.stop:hover {
+  background: rgba(160, 70, 70, 0.26);
+}
+
+/* Context-window ring (arc, not a filled circle) */
+.token-ring {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+}
+
+.token-ring svg {
+  display: block;
+}
+
+.token-ring-track {
+  fill: none;
+  stroke: #1e2a26;
+  stroke-width: 3.5;
+}
+
+.token-ring-arc {
+  fill: none;
+  stroke: var(--kripl-accent);
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.3s ease, stroke 0.3s ease;
+}
+
+.token-ring-arc.full {
+  stroke: #e0a458;
+}
+
+/* Server did not report a context limit — neutral arc, no fake numbers. */
+.token-ring-arc.unknown {
+  stroke: #5b6673;
+}
+
+.token-ring-tooltip {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  grid-template-columns: auto;
+  gap: 2px;
+  padding: 6px 9px;
+  border: 1px solid #3a4656;
+  border-radius: 8px;
+  background: #1a212b;
+  color: #dbe2ea;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 40;
+}
+
+.token-ring:hover .token-ring-tooltip {
+  display: grid;
+}
+
+/* Settings dialog (replaces the right-side inspector) */
+.settings-dialog {
+  width: min(720px, calc(100vw - 48px));
+  max-height: min(760px, calc(100vh - 48px));
+  overflow: auto;
+  border: 1px solid #3a4656;
+  border-radius: 14px;
+  background: #12171e;
+  padding: 18px 22px 22px;
+  box-shadow: 0 28px 100px rgba(0, 0, 0, 0.5);
+}
+
+.settings-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.settings-heading h3 {
+  margin: 0;
+  color: #e1e6ed;
+  font-size: 18px;
+}
+
+.settings-close {
+  width: 30px;
+  height: 30px;
+  font-size: 16px;
+  color: #8793a2;
+}
+
+.settings-close:hover {
+  background: #232b36;
+  color: #e0a7ad;
 }

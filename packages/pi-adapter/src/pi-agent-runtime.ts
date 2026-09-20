@@ -19,7 +19,9 @@ import {
   writePiLocalModelConfig
 } from "./pi-local-config.js";
 import { writePiBrowserTools } from "./pi-browser-tools.js";
+import { writePiModelTuning } from "./pi-model-tuning.js";
 import { writePiPermissionGate } from "./pi-permission-gate.js";
+import { writePiTextToolBridge } from "./pi-text-tools.js";
 import { writePiWebTools } from "./pi-web-tools.js";
 import { PiRpcProcess } from "./rpc-process.js";
 import { normalizePiSessionMessages } from "./pi-session-normalizer.js";
@@ -30,6 +32,8 @@ export interface PiAgentRuntimeOptions {
   agentDir: string;
   sessionDir?: string;
   localModel: PiLocalModelConfig;
+  /** Custom system prompt appended to the agent's base prompt every turn. */
+  modelSystemPrompt?: string;
   networkMode?: NetworkMode;
   permissionPolicy?: PermissionPolicy;
   toolBridge?: ToolBridgeConnection;
@@ -79,8 +83,13 @@ export class PiAgentRuntime implements AgentRuntime {
           this.options.agentDir,
           this.options.permissionPolicy ?? DEFAULT_PERMISSION_POLICY
         ),
+        writePiModelTuning(
+          this.options.agentDir,
+          this.options.modelSystemPrompt ? { systemPrompt: this.options.modelSystemPrompt } : {}
+        ),
         writePiWebTools(this.options.agentDir, networkMode),
-        writePiBrowserTools(this.options.agentDir)
+        writePiBrowserTools(this.options.agentDir),
+        writePiTextToolBridge(this.options.agentDir)
       ]);
 
       this.unsubscribeRpc = this.rpc.subscribe((event) => {
@@ -147,6 +156,11 @@ export class PiAgentRuntime implements AgentRuntime {
       });
       throw error;
     }
+  }
+
+  async setSessionName(name: string): Promise<void> {
+    const response = await this.rpc.send({ type: "set_session_name", name });
+    assertSuccess(response);
   }
 
   async stop(): Promise<void> {

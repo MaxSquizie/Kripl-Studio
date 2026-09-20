@@ -12,7 +12,7 @@
     "dev": "npm run build:packages && npm run dev --workspace @kripl/desktop",
     "build": "npm run build:packages && npm run build --workspace @kripl/desktop",
     "typecheck": "npm run build:packages && npm run typecheck --workspace @kripl/desktop",
-    "test": "npm run build:packages && npm test --workspace @kripl/app-state && npm test --workspace @kripl/context-runtime && npm test --workspace @kripl/permissions && npm test --workspace @kripl/local-openai-provider && npm test --workspace @kripl/workspace && npm test --workspace @kripl/terminal && npm test --workspace @kripl/pi-adapter",
+    "test": "npm run build:packages && npm test --workspace @kripl/core && npm test --workspace @kripl/app-state && npm test --workspace @kripl/context-runtime && npm test --workspace @kripl/permissions && npm test --workspace @kripl/local-openai-provider && npm test --workspace @kripl/workspace && npm test --workspace @kripl/terminal && npm test --workspace @kripl/pi-adapter",
     "dist:win": "npm run build:packages && npm run dist:win --workspace @kripl/desktop"
   },
   "engines": {

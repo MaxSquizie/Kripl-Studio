@@ -49,6 +49,8 @@ export interface WorkspaceChange {
   staged: boolean;
   unstaged: boolean;
   oldPath?: string;
+  /** Filesystem modification time (ms); absent when the file is gone. */
+  mtimeMs?: number;
 }
 
 export interface WorkspaceDiff {

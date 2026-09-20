@@ -535,6 +535,8 @@ button {
 .permissions-card > summary {
   display: flex;
   align-items: center;
+  /* Same header height as the Sessions tab (26px icon buttons). */
+  min-height: 26px;
   justify-content: space-between;
   cursor: pointer;
   user-select: none;
@@ -699,6 +701,7 @@ button {
 
 .session-heading-actions {
   display: inline-flex;
+  align-items: center;
   gap: 2px;
 }
 

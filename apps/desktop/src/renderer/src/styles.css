@@ -698,6 +698,76 @@ button {
   background: var(--bg-raised);
 }
 
+/* Recent projects panel — same frameless look as Sessions. */
+.recent-projects-card {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+}
+
+.recent-project-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.recent-project-row {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  width: 100%;
+  border: 1px solid var(--bg-tinted);
+  background: var(--bg-surface);
+  padding: 4px;
+}
+
+.recent-project-row.active {
+  border-color: var(--kripl-accent-dim);
+  background: color-mix(in srgb, var(--kripl-accent) 8%, var(--bg-surface));
+}
+
+.recent-project-open {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.recent-project-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  font-weight: 600;
+}
+
+.recent-project-meta {
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.recent-project-forget {
+  align-self: center;
+}
+
+/* Branding loop pinned to the bottom of the right rail:
+   as wide as the rail, square. */
+.rail-gif {
+  margin-top: auto;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+}
+
 /* Sessions panel: plain rectangle, no frame. Collapsible like the other tabs. */
 .session-card {
   margin: 0;
@@ -1080,87 +1150,6 @@ button {
 .diff-line.header {
   color: var(--text-secondary);
   font-weight: 600;
-}
-
-
-.recent-projects-card {
-  gap: 9px;
-}
-
-.recent-projects-list {
-  display: grid;
-  gap: 5px;
-}
-
-.recent-project-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 28px;
-  border: 1px solid var(--bg-tinted);
-  border-radius: 8px;
-  background: var(--bg-surface);
-  overflow: hidden;
-}
-
-.recent-project-row.current {
-  border-color: var(--kripl-accent-dim);
-  background: var(--bg-surface);
-  box-shadow: inset 2px 0 0 var(--success-dim);
-}
-
-.recent-project-open,
-.recent-project-forget {
-  border: 0;
-  background: transparent;
-  color: inherit;
-}
-
-.recent-project-open {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-  padding: 8px 9px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.recent-project-open:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--kripl-accent) 12%, transparent);
-}
-
-.recent-project-open:disabled {
-  cursor: default;
-}
-
-.recent-project-open strong,
-.recent-project-open span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.recent-project-open strong {
-  color: var(--success);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.recent-project-open span {
-  color: var(--text-muted);
-  font-size: 9px;
-}
-
-.recent-project-forget {
-  display: grid;
-  place-items: center;
-  border-left: 1px solid var(--bg-tinted);
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.recent-project-forget:hover {
-  background: color-mix(in srgb, var(--kripl-accent-bright) 12%, transparent);
-  color: var(--success);
 }
 
 

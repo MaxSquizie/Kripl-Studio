@@ -1,4 +1,4 @@
-import type { AgentEvent, AttachedFile, AgentInteractionRequest, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, ContextInspectorSnapshot, DesktopRuntimeSettings, DesktopUiState, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceEntry, WorkspaceFilePreview, WorkspaceGitStatus } from "@kripl/core";
+import type { AgentEvent, AttachedFile, AgentInteractionRequest, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, ContextInspectorSnapshot, DesktopRuntimeSettings, DesktopUiState, RecentProject, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceEntry, WorkspaceFilePreview, WorkspaceGitStatus } from "@kripl/core";
 import { cleanAssistantToolText } from "@kripl/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
@@ -12,6 +12,8 @@ import { GitStatusCard } from "./GitStatusCard";
 import { CollapsibleDetails } from "./CollapsibleDetails";
 import { AgentPermissionsCard } from "./AgentPermissionsCard";
 import { ModelTuningCard } from "./ModelTuningCard";
+import { RecentProjectsCard } from "./RecentProjectsCard";
+import kriplCodingGif from "./assets/kripl-coding.gif";
 import { Markdown, CopyIconButton } from "./Markdown";
 import { WorkspaceSearchPalette, type WorkspaceSearchMode } from "./WorkspaceSearchPalette";
 
@@ -220,6 +222,7 @@ export function App() {
   const [editorRevealTarget, setEditorRevealTarget] = useState<WorkspaceEditorRevealTarget | undefined>(undefined);
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [runtimeSettings, setRuntimeSettings] = useState<DesktopRuntimeSettings | null>(null);
+  const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [contextSnapshot, setContextSnapshot] = useState<ContextInspectorSnapshot | null>(null);
   const [endpoint, setEndpoint] = useState(() => readStored("kripl.localEndpoint", DEFAULT_LOCAL_ENDPOINT));
   const [probe, setProbe] = useState<ProbeState>({ status: "idle", models: [] });
@@ -300,6 +303,7 @@ export function App() {
       .then(async (bootstrap) => {
         if (disposed) return;
         setRuntimeSettings(bootstrap.runtime);
+        setRecentProjects(bootstrap.recentProjects ?? []);
         if (bootstrap.workspace) {
           await hydrateWorkspace(bootstrap.workspace, bootstrap.ui);
         }
@@ -875,6 +879,33 @@ export function App() {
         expandedDirectories: []
       });
       setAgentError("");
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  // Quick switch to a recent repository from the right rail.
+  async function openRecentProject(path: string) {
+    if (!confirmWorkspaceSwitch()) return;
+
+    try {
+      const descriptor = await window.kripl.openRecentProject(path);
+      await hydrateWorkspace(descriptor, {
+        workspaceView: { type: "agent" },
+        expandedDirectories: []
+      });
+      setAgentError("");
+      // Re-read bootstrap: the recent list order and runtime settings changed.
+      const bootstrap = await window.kripl.getDesktopBootstrap();
+      setRecentProjects(bootstrap.recentProjects ?? []);
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function forgetRecentProject(path: string) {
+    try {
+      setRecentProjects(await window.kripl.forgetRecentProject(path));
     } catch (error) {
       setAgentError(error instanceof Error ? error.message : String(error));
     }
@@ -2075,6 +2106,16 @@ export function App() {
               }}
             />
           )}
+
+          <RecentProjectsCard
+            projects={recentProjects}
+            currentPath={workspace?.path}
+            onOpen={(path) => void openRecentProject(path)}
+            onForget={(path) => void forgetRecentProject(path)}
+          />
+
+          {/* Branding loop pinned to the bottom of the rail. */}
+          <img className="rail-gif" src={kriplCodingGif} alt="" aria-hidden="true" />
         </aside>
 
       </div>

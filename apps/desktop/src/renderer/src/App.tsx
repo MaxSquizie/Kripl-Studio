@@ -1425,7 +1425,7 @@ export function App() {
             onClick={() => void window.kripl.closeWindow()}
           >
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-              <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.2" />
+              <path d="M1.5 1.5l9 9M10.5 1.5l-9 9" stroke="currentColor" strokeWidth="1.2" />
             </svg>
           </button>
         </div>

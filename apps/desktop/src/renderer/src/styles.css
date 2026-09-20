@@ -692,6 +692,11 @@ button {
   animation: details-expand 0.5s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* Collapsed Sessions header shows only the title and chevron. */
+.session-card:not([open]) .session-heading-actions .icon-button {
+  display: none;
+}
+
 .session-heading {
   display: flex;
   align-items: center;

@@ -101,7 +101,14 @@ button {
   align-items: center;
   height: 38px;
   border-bottom: 1px solid var(--border-subtle);
-  background: linear-gradient(90deg, var(--bg-surface) 0%, var(--kripl-accent-dim) 100%);
+  /* Dark at both edges, brightening toward the middle. */
+  background:
+    linear-gradient(
+      90deg,
+      var(--bg-surface) 0%,
+      var(--kripl-accent-dim) 50%,
+      var(--bg-surface) 100%
+    );
   padding: 0 8px 0 16px;
   -webkit-app-region: drag;
 }

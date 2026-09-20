@@ -382,6 +382,7 @@ export function App() {
         setAgentStatus(event.status);
         if (event.status === "stopped" || event.status === "error") {
           setInteraction(null);
+          settleTurnActivity();
           sweepEmptyAssistantBubbles();
           void refreshSessions();
         }
@@ -389,6 +390,7 @@ export function App() {
           setAgentError(event.message ?? "Pi agent failed.");
         }
         if (event.status === "ready") {
+          settleTurnActivity();
           sweepEmptyAssistantBubbles();
           void syncActiveSessionFromRuntime();
         }
@@ -1264,6 +1266,31 @@ export function App() {
     runAssistantIdsRef.current = new Set();
     toolSinceMessageRef.current = false;
     setLiveSteps(null);
+  }
+
+  /**
+   * Run finished: providers sometimes start a trailing thinking-only turn
+   * after the final answer. Fold whatever is still pending into the last
+   * assistant message and clear the live card so it does not linger.
+   */
+  function settleTurnActivity(): void {
+    const steps = takeTurnActivity();
+    if (!steps) return;
+    setFeed((current) => {
+      for (let i = current.length - 1; i >= 0; i -= 1) {
+        const item: FeedItem | undefined = current[i];
+        if (!item || item.kind !== "message" || item.role !== "assistant") continue;
+        const next = [...current];
+        next[i] = {
+          ...item,
+          reasoning: {
+            steps: [...(item.reasoning?.steps ?? []), ...steps.steps]
+          }
+        };
+        return next;
+      }
+      return current; // no assistant message at all — drop the trailing thinking
+    });
   }
 
   /**

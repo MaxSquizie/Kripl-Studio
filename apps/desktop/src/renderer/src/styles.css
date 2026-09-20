@@ -716,6 +716,11 @@ button {
   cursor: pointer;
   user-select: none;
   list-style: none;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .recent-projects-card > summary::-webkit-details-marker {

@@ -33,8 +33,8 @@ export function RecentProjectsCard({
       bodyClassName="recent-projects-body"
       defaultOpen
       summary={
-        <span className="session-heading">
-          <span className="eyebrow">Projects</span>
+        <>
+          <span>Projects</span>
           <span className="chevrons" aria-hidden="true">
             <svg className="chevron-down" width="14" height="9" viewBox="0 0 14 9" fill="none">
               <path d="M2 2.5l5 5 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
@@ -43,7 +43,7 @@ export function RecentProjectsCard({
               <path d="M2 6.5l5-5 5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </span>
-        </span>
+        </>
       }
     >
       {ordered.length === 0 ? (

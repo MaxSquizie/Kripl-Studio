@@ -10,6 +10,11 @@ declare module "*.gif" {
   export default src;
 }
 
+declare module "*.webm" {
+  const src: string;
+  export default src;
+}
+
 export {};
 
 interface ActionResult {

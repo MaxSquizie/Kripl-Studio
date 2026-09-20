@@ -760,7 +760,7 @@ button {
 
 /* Branding loop pinned to the bottom of the right rail:
    as wide as the rail, square. */
-.rail-gif {
+.rail-loop {
   margin-top: auto;
   display: block;
   width: 100%;

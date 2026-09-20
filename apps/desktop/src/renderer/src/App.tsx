@@ -13,7 +13,7 @@ import { CollapsibleDetails } from "./CollapsibleDetails";
 import { AgentPermissionsCard } from "./AgentPermissionsCard";
 import { ModelTuningCard } from "./ModelTuningCard";
 import { RecentProjectsCard } from "./RecentProjectsCard";
-import kriplCodingGif from "./assets/kripl-coding.gif";
+import kriplCodingLoop from "./assets/kripl-coding.webm";
 import { Markdown, CopyIconButton } from "./Markdown";
 import { WorkspaceSearchPalette, type WorkspaceSearchMode } from "./WorkspaceSearchPalette";
 
@@ -2115,7 +2115,15 @@ export function App() {
           />
 
           {/* Branding loop pinned to the bottom of the rail. */}
-          <img className="rail-gif" src={kriplCodingGif} alt="" aria-hidden="true" />
+          <video
+            className="rail-loop"
+            src={kriplCodingLoop}
+            autoPlay
+            loop
+            muted
+            playsInline
+            aria-hidden="true"
+          />
         </aside>
 
       </div>

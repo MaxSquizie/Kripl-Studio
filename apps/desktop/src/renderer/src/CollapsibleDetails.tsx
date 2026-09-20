@@ -11,11 +11,14 @@ export function CollapsibleDetails({
   className,
   summary,
   bodyClassName,
+  defaultOpen = false,
   children
 }: {
   className: string;
   summary: ReactNode;
   bodyClassName?: string | undefined;
+  /** Start expanded. Native toggling afterwards is not re-synced by React. */
+  defaultOpen?: boolean;
   children: ReactNode;
 }) {
   const [openTick, setOpenTick] = useState(0);
@@ -32,7 +35,7 @@ export function CollapsibleDetails({
   }, []);
 
   return (
-    <details ref={detailsRef} className={className}>
+    <details ref={detailsRef} className={className} open={defaultOpen || undefined}>
       <summary>{summary}</summary>
       {bodyClassName ? (
         <div key={openTick} className={bodyClassName}>

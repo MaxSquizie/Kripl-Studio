@@ -657,13 +657,37 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
-/* Sessions panel: plain rectangle, no frame. */
+/* Right rail sections light up on hover. */
+.session-rail > .status-card {
+  transition: background-color 150ms ease;
+}
+
+.session-rail > .status-card:hover {
+  background: var(--bg-raised);
+}
+
+/* Sessions panel: plain rectangle, no frame. Collapsible like the other tabs. */
 .session-card {
   margin: 0;
   border: none;
   border-radius: 0;
   background: var(--bg-surface);
   padding: 12px 14px;
+}
+
+.session-card > summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+.session-card > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Smooth expand when the sessions tab opens. */
+.session-card[open] .sessions-body {
+  animation: details-expand 0.5s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .session-heading {

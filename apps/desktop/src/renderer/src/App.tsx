@@ -1798,29 +1798,49 @@ export function App() {
         </main>
 
         <aside className="session-rail">
-          <section className="status-card session-card">
-            <div className="session-heading">
-              <span className="eyebrow">Sessions</span>
-              <span className="session-heading-actions">
-                <button
-                  className="icon-button"
-                  type="button"
-                  title="New session"
-                  disabled={!canStartAgent}
-                  onClick={() => void startAgent()}
-                >
-                  +
-                </button>
-                <button
-                  className="icon-button"
-                  type="button"
-                  title="Refresh sessions"
-                  onClick={() => void refreshSessions()}
-                >
-                  ↻
-                </button>
+          <CollapsibleDetails
+            className="status-card session-card"
+            bodyClassName="sessions-body"
+            defaultOpen
+            summary={
+              <span className="session-heading">
+                <span className="eyebrow">Sessions</span>
+                <span className="session-heading-actions">
+                  <button
+                    className="icon-button"
+                    type="button"
+                    title="New session"
+                    disabled={!canStartAgent}
+                    onClick={(event) => {
+                      event.preventDefault(); // do not toggle the panel
+                      void startAgent();
+                    }}
+                  >
+                    +
+                  </button>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    title="Refresh sessions"
+                    onClick={(event) => {
+                      event.preventDefault(); // do not toggle the panel
+                      void refreshSessions();
+                    }}
+                  >
+                    ↻
+                  </button>
+                  <span className="chevrons" aria-hidden="true">
+                    <svg className="chevron-down" width="14" height="9" viewBox="0 0 14 9" fill="none">
+                      <path d="M2 2.5l5 5 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    <svg className="chevron-up" width="14" height="9" viewBox="0 0 14 9" fill="none">
+                      <path d="M2 6.5l5-5 5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </span>
+                </span>
               </span>
-            </div>
+            }
+          >
 
             {!workspace ? (
               <p className="sidebar-note">Open a project to list its chats.</p>
@@ -1891,7 +1911,7 @@ export function App() {
                 </div>
               </>
             )}
-          </section>
+          </CollapsibleDetails>
 
           {runtimeSettings && (
             <AgentPermissionsCard

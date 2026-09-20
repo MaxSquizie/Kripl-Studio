@@ -1,8 +1,8 @@
 .terminal-panel {
   min-height: 0;
   overflow: hidden;
-  border-top: 1px solid #252c35;
-  background: #0b0e13;
+  border-top: 1px solid var(--bg-tinted);
+  background: var(--bg-app);
   visibility: hidden;
 }
 
@@ -15,8 +15,8 @@
   height: 34px;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid #1e242c;
-  background: #10141a;
+  border-bottom: 1px solid var(--bg-overlay);
+  background: var(--bg-surface);
   padding: 0 10px 0 13px;
 }
 
@@ -24,7 +24,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  color: #b4bdc8;
+  color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.07em;
   font-size: 10px;
@@ -32,14 +32,14 @@
 }
 
 .terminal-status {
-  color: #6f7b89;
+  color: var(--text-muted);
   text-transform: none;
   letter-spacing: normal;
   font-weight: 500;
 }
 
 .terminal-status.running {
-  color: #8fc69c;
+  color: var(--success);
 }
 
 .terminal-actions {
@@ -56,13 +56,13 @@
   border: 0;
   border-radius: 5px;
   background: transparent;
-  color: #8792a0;
+  color: var(--text-muted);
   cursor: pointer;
 }
 
 .terminal-actions button:hover:not(:disabled) {
-  background: #202630;
-  color: #d5dce5;
+  background: var(--bg-tinted);
+  color: var(--text-primary);
 }
 
 .terminal-actions button:disabled {
@@ -72,7 +72,7 @@
 
 .terminal-error {
   margin-right: 4px;
-  color: #d68f94;
+  color: var(--error);
   font-size: 10px;
 }
 
@@ -87,5 +87,5 @@
 }
 
 .terminal-host .xterm-viewport {
-  scrollbar-color: #313a46 #0b0e13;
+  scrollbar-color: var(--bg-tinted) var(--bg-app);
 }

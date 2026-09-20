@@ -1,31 +1,31 @@
 .endpoint-field {
   display: grid;
   gap: 6px;
-  color: #8994a3;
+  color: var(--text-muted);
   font-size: 11px;
 }
 
 .endpoint-field input,
 .model-select {
   width: 100%;
-  border: 1px solid #2c3542;
+  border: 1px solid var(--bg-tinted);
   border-radius: 7px;
   outline: none;
-  background: #0d1117;
+  background: var(--bg-app);
   padding: 8px 9px;
-  color: #c7cfda;
+  color: var(--text-secondary);
   font: 11px "Cascadia Code", Consolas, monospace;
 }
 
 .endpoint-field input:focus,
 .model-select:focus {
-  border-color: #52698e;
+  border-color: var(--info-dim);
 }
 
 .probe-button {
-  border: 1px solid #36465f;
+  border: 1px solid var(--info-deep);
   border-radius: 7px;
-  background: #1c2739;
+  background: var(--bg-tinted);
   padding: 8px 10px;
   cursor: pointer;
   font-size: 12px;
@@ -38,16 +38,16 @@
 
 .probe-result {
   margin: 0;
-  color: #8f9aa9;
+  color: var(--text-secondary);
   font-size: 11px;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
 
 .probe-result.ready {
-  color: #9fd5ae;
+  color: var(--success);
 }
 
 .probe-result.error {
-  color: #d9a0a0;
+  color: var(--error-bright);
 }

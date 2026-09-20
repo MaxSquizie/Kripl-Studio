@@ -8,9 +8,9 @@
 .chat-message {
   display: grid;
   gap: 7px;
-  border: 1px solid #252d37;
+  border: 1px solid var(--bg-tinted);
   border-radius: 12px;
-  background: #12171e;
+  background: var(--bg-surface);
   padding: 14px 16px;
 }
 
@@ -18,7 +18,7 @@
 .chat-message.user {
   margin-left: min(3%, 22px);
   border-bottom-right-radius: 0;
-  background: #171d27;
+  background: var(--bg-overlay);
 }
 
 .chat-message.assistant {
@@ -31,7 +31,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  color: #778394;
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-size: 10px;
@@ -39,7 +39,7 @@
 }
 
 .message-tokps {
-  color: #5f7a6e;
+  color: var(--text-faint);
   text-transform: none;
   letter-spacing: 0;
   font-size: 10px;
@@ -56,7 +56,7 @@
   align-items: center;
   gap: 8px;
   cursor: pointer;
-  color: #6b7686;
+  color: var(--text-muted);
   font-size: 10.5px;
   user-select: none;
   list-style: none;
@@ -69,7 +69,7 @@
 .reasoning-preview {
   flex: 1;
   min-width: 0;
-  color: #4f5a68;
+  color: var(--border-bright);
   font-size: 10px;
   white-space: nowrap;
   overflow: hidden;
@@ -79,7 +79,7 @@
 .chevrons {
   display: inline-flex;
   flex-shrink: 0;
-  color: #5b6673;
+  color: var(--text-faint);
 }
 
 .chevron-up {
@@ -98,8 +98,8 @@ details[open] .chevrons .chevron-up {
 .reasoning-body {
   margin-top: 6px;
   padding-left: 10px;
-  border-left: 2px solid #233029;
-  color: #9aa5b1;
+  border-left: 2px solid var(--bg-tinted);
+  color: var(--text-secondary);
   font-size: 12px;
   line-height: 1.5;
   display: grid;
@@ -125,15 +125,15 @@ details[open] .chevrons .chevron-up {
 .reasoning-tool {
   font-family: "Cascadia Code", Consolas, monospace;
   font-size: 11.5px;
-  color: #7d8996;
+  color: var(--text-muted);
 }
 
 .reasoning-tool.completed {
-  color: #8fc69c;
+  color: var(--success);
 }
 
 .reasoning-tool.failed {
-  color: #d9878c;
+  color: var(--error);
 }
 
 .reasoning-tool summary {
@@ -153,10 +153,10 @@ details[open] .chevrons .chevron-up {
 .reasoning-tool pre {
   margin: 4px 0 2px;
   padding: 6px 8px;
-  border-left: 2px solid #233029;
+  border-left: 2px solid var(--bg-tinted);
   border-radius: 4px;
-  background: #0f141a;
-  color: #9aa5b1;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
   font-size: 11px;
   line-height: 1.45;
   white-space: pre-wrap;
@@ -166,7 +166,7 @@ details[open] .chevrons .chevron-up {
 }
 
 .message-text {
-  color: #d1d7df;
+  color: var(--text-primary);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.58;
@@ -174,7 +174,7 @@ details[open] .chevrons .chevron-up {
 }
 
 .thinking-card > div {
-  color: #d1d7df;
+  color: var(--text-primary);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.5;
@@ -183,10 +183,10 @@ details[open] .chevrons .chevron-up {
 
 .thinking-card,
 .tool-card {
-  border: 1px solid #252e39;
+  border: 1px solid var(--bg-tinted);
   border-radius: 9px;
-  background: #0f141a;
-  color: #96a0ae;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
   font-size: 12px;
 }
 
@@ -200,7 +200,7 @@ details[open] .chevrons .chevron-up {
 .thinking-card > div,
 .tool-card pre {
   margin: 0;
-  border-top: 1px solid #232a33;
+  border-top: 1px solid var(--bg-tinted);
   padding: 12px;
 }
 
@@ -212,17 +212,17 @@ details[open] .chevrons .chevron-up {
 }
 
 .tool-card.completed {
-  border-color: #293a31;
+  border-color: var(--bg-tinted);
 }
 
 .tool-card.failed {
-  border-color: #503236;
+  border-color: var(--border-strong);
 }
 
 .tool-card pre {
   max-height: 280px;
   overflow: auto;
-  color: #aab4c1;
+  color: var(--text-secondary);
   white-space: pre-wrap;
   word-break: break-word;
   font: 11px/1.5 "Cascadia Code", Consolas, monospace;
@@ -231,18 +231,18 @@ details[open] .chevrons .chevron-up {
 .agent-error {
   width: min(880px, 100%);
   margin: 16px auto 0;
-  border: 1px solid #583439;
+  border: 1px solid var(--error-border);
   border-radius: 9px;
-  background: #231518;
+  background: var(--bg-raised);
   padding: 11px 13px;
-  color: #dfa7aa;
+  color: var(--error-bright);
   font-size: 12px;
 }
 
 .agent-start-button {
-  border: 1px solid #3d5274;
+  border: 1px solid var(--info-deep);
   border-radius: 7px;
-  background: #21304a;
+  background: var(--info-deep);
   padding: 9px 10px;
   cursor: pointer;
   font-size: 12px;
@@ -254,13 +254,13 @@ details[open] .chevrons .chevron-up {
 }
 
 .stop-button {
-  border-color: #673c42 !important;
-  background: #321b20 !important;
-  color: #e0a7ad;
+  border-color: var(--error-border) !important;
+  background: var(--bg-overlay) !important;
+  color: var(--error-bright);
 }
 
 .composer textarea:not(:disabled) {
-  border-color: #34445c;
+  border-color: var(--info-deep);
 }
 
 
@@ -278,16 +278,16 @@ details[open] .chevrons .chevron-up {
   width: min(620px, calc(100vw - 40px));
   max-height: min(720px, calc(100vh - 40px));
   overflow: auto;
-  border: 1px solid #3a4656;
+  border: 1px solid var(--border-strong);
   border-radius: 14px;
-  background: #12171e;
+  background: var(--bg-surface);
   padding: 22px;
   box-shadow: 0 28px 100px rgba(0, 0, 0, 0.5);
 }
 
 .interaction-dialog h3 {
   margin: 7px 0 12px;
-  color: #e1e6ed;
+  color: var(--text-primary);
   font-size: 18px;
 }
 
@@ -295,11 +295,11 @@ details[open] .chevrons .chevron-up {
   max-height: 360px;
   overflow: auto;
   margin: 0;
-  border: 1px solid #29323d;
+  border: 1px solid var(--bg-tinted);
   border-radius: 9px;
-  background: #0b0f14;
+  background: var(--bg-app);
   padding: 12px;
-  color: #b8c1cd;
+  color: var(--text-secondary);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font: 11px/1.55 "Cascadia Code", Consolas, monospace;
@@ -315,15 +315,15 @@ details[open] .chevrons .chevron-up {
 }
 
 .secondary-button {
-  border: 1px solid #35404e;
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
-  background: #171d25;
+  background: var(--bg-raised);
   padding: 9px 13px;
   cursor: pointer;
 }
 
 .interaction-note {
-  color: #8f99a7;
+  color: var(--text-secondary);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -331,11 +331,11 @@ details[open] .chevrons .chevron-up {
 
 .browser-toggle {
   -webkit-app-region: no-drag;
-  border: 1px solid #2d3744;
+  border: 1px solid var(--bg-tinted);
   border-radius: 999px;
-  background: #151b22;
+  background: var(--bg-raised);
   padding: 6px 11px;
-  color: #8793a2;
+  color: var(--text-muted);
   cursor: pointer;
   font-size: 11px;
   white-space: nowrap;
@@ -343,9 +343,9 @@ details[open] .chevrons .chevron-up {
 
 .browser-toggle:hover,
 .browser-toggle.active {
-  border-color: #465873;
-  background: #1b2637;
-  color: #d5dce5;
+  border-color: var(--info-dim);
+  background: var(--bg-tinted);
+  color: var(--text-primary);
 }
 
 .browser-url {
@@ -356,17 +356,17 @@ details[open] .chevrons .chevron-up {
 
 
 .browser-toggle:disabled {
-  border-color: #29352f;
-  background: #111714;
-  color: #5f706a;
+  border-color: var(--bg-tinted);
+  background: var(--bg-surface);
+  color: var(--text-faint);
   cursor: default;
   opacity: 0.72;
 }
 
 .browser-toggle.active {
-  border-color: #4f806f;
-  background: #173027;
-  color: #bdd8cf;
+  border-color: var(--success-dim);
+  background: var(--bg-overlay);
+  color: var(--success);
 }
 
 /* Markdown rendering inside chat messages and reasoning */
@@ -414,7 +414,7 @@ details[open] .chevrons .chevron-up {
 .markdown code {
   font-family: "Cascadia Code", Consolas, monospace;
   font-size: 12px;
-  background: #1a212b;
+  background: var(--bg-overlay);
   border-radius: 4px;
   padding: 1px 5px;
 }
@@ -422,8 +422,8 @@ details[open] .chevrons .chevron-up {
 .markdown pre {
   margin: 0 0 8px;
   padding: 10px 12px;
-  background: #0b0f14;
-  border: 1px solid #232a33;
+  background: var(--bg-app);
+  border: 1px solid var(--bg-tinted);
   border-radius: 8px;
   overflow-x: auto;
 }
@@ -437,12 +437,12 @@ details[open] .chevrons .chevron-up {
 .markdown blockquote {
   margin: 0 0 8px;
   padding-left: 10px;
-  border-left: 3px solid #2c3644;
-  color: #9aa5b3;
+  border-left: 3px solid var(--bg-tinted);
+  color: var(--text-secondary);
 }
 
 .markdown a {
-  color: #7fb0d9;
+  color: var(--info);
   text-decoration: none;
 }
 
@@ -453,7 +453,7 @@ details[open] .chevrons .chevron-up {
 .markdown hr {
   margin: 10px 0;
   border: none;
-  border-top: 1px solid #252d37;
+  border-top: 1px solid var(--bg-tinted);
 }
 
 /* Attachments */
@@ -468,20 +468,20 @@ details[open] .chevrons .chevron-up {
   display: inline-flex;
   align-items: flex-start;
   gap: 8px;
-  border: 1px solid #2c3a4d;
+  border: 1px solid var(--border-strong);
   border-radius: 999px;
-  background: #151b24;
+  background: var(--bg-raised);
   padding: 3px 6px 3px 10px;
   font-size: 11.5px;
-  color: #b8c2cf;
+  color: var(--text-secondary);
   max-width: 320px;
   overflow: hidden;
   white-space: nowrap;
 }
 
 .attach-chip.error {
-  border-color: #503236;
-  color: #dfa7aa;
+  border-color: var(--border-strong);
+  color: var(--error-bright);
 }
 
 .attach-chip.attach-image {
@@ -489,7 +489,7 @@ details[open] .chevrons .chevron-up {
   position: relative;
   display: inline-block;
   padding: 2px;
-  border: 1px solid #4a5568;
+  border: 1px solid var(--border-bright);
   border-radius: 0;
   background: transparent;
 }
@@ -508,7 +508,7 @@ details[open] .chevrons .chevron-up {
   border: none;
   border-radius: 0;
   background: rgba(13, 16, 20, 0.78);
-  color: #e0a7ad;
+  color: var(--error-bright);
   font-size: 13px;
   line-height: 1;
   padding: 0;
@@ -535,7 +535,7 @@ details[open] .chevrons .chevron-up {
 
 .attach-chip-pdf {
   border: none;
-  background: #1d2735;
+  background: var(--bg-tinted);
   color: #9fb6d0;
   font-size: 10.5px;
   line-height: 16px;
@@ -551,7 +551,7 @@ details[open] .chevrons .chevron-up {
   grid-column: 1 / -1;
   width: 100%;
   height: 380px;
-  border: 1px solid #4a5568;
+  border: 1px solid var(--border-bright);
   border-radius: 0;
   background: #ffffff;
 }
@@ -577,7 +577,7 @@ details[open] .chevrons .chevron-up {
   max-height: 360px;
   width: auto;
   height: auto;
-  border: 1px solid #4a5568;
+  border: 1px solid var(--border-bright);
   border-radius: 0;
 }
 
@@ -602,7 +602,7 @@ details[open] .chevrons .chevron-up {
   max-height: 92%;
   width: auto;
   height: auto;
-  border: 1px solid #4a5568;
+  border: 1px solid var(--border-bright);
 }
 
 @keyframes lightbox-fade {
@@ -617,7 +617,7 @@ details[open] .chevrons .chevron-up {
 .attach-chip-remove {
   border: none;
   background: transparent;
-  color: #778394;
+  color: var(--text-muted);
   cursor: pointer;
   font-size: 13px;
   line-height: 1;
@@ -626,7 +626,7 @@ details[open] .chevrons .chevron-up {
 }
 
 .attach-chip-remove:hover {
-  color: #e0a7ad;
+  color: var(--error-bright);
 }
 
 .composer-actions {
@@ -640,10 +640,10 @@ details[open] .chevrons .chevron-up {
   z-index: 50;
   display: grid;
   place-items: center;
-  border: 2px dashed #4f806f;
+  border: 2px dashed var(--success-dim);
   border-radius: 12px;
-  background: rgba(23, 48, 39, 0.85);
-  color: #bdd8cf;
+  background: color-mix(in srgb, var(--kripl-accent) 85%, transparent);
+  color: var(--success);
   font-size: 14px;
   pointer-events: none;
 }
@@ -689,7 +689,7 @@ summary {
 }
 
 .composer .attach-button:hover {
-  background: rgba(63, 143, 116, 0.12);
+  background: color-mix(in srgb, var(--kripl-accent) 12%, transparent);
 }
 
 /* Circular send / stop button with an up-arrow icon. */
@@ -700,24 +700,24 @@ summary {
   height: 32px;
   border: 1px solid var(--kripl-accent);
   border-radius: 50%;
-  background: rgba(63, 143, 116, 0.16);
-  color: #58c29a;
+  background: color-mix(in srgb, var(--kripl-accent) 16%, transparent);
+  color: var(--kripl-accent);
   cursor: pointer;
   padding: 0;
 }
 
 .send-button:hover:not(:disabled) {
-  background: rgba(63, 143, 116, 0.28);
+  background: color-mix(in srgb, var(--kripl-accent) 28%, transparent);
 }
 
 .send-button.stop {
-  border-color: #7a4444;
-  background: rgba(160, 70, 70, 0.14);
-  color: #d08080;
+  border-color: var(--error-dim);
+  background: color-mix(in srgb, var(--error) 14%, transparent);
+  color: var(--error);
 }
 
 .send-button.stop:hover {
-  background: rgba(160, 70, 70, 0.26);
+  background: color-mix(in srgb, var(--error) 26%, transparent);
 }
 
 /* Context-window ring (arc, not a filled circle) */
@@ -734,7 +734,7 @@ summary {
 
 .token-ring-track {
   fill: none;
-  stroke: #1e2a26;
+  stroke: var(--bg-overlay);
   stroke-width: 3.5;
 }
 
@@ -747,12 +747,12 @@ summary {
 }
 
 .token-ring-arc.full {
-  stroke: #e0a458;
+  stroke: var(--warning);
 }
 
 /* Server did not report a context limit — neutral arc, no fake numbers. */
 .token-ring-arc.unknown {
-  stroke: #5b6673;
+  stroke: var(--text-faint);
 }
 
 .token-ring-tooltip {
@@ -764,10 +764,10 @@ summary {
   grid-template-columns: auto;
   gap: 2px;
   padding: 6px 9px;
-  border: 1px solid #3a4656;
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
-  background: #1a212b;
-  color: #dbe2ea;
+  background: var(--bg-overlay);
+  color: var(--text-primary);
   font-size: 11px;
   line-height: 1.35;
   white-space: nowrap;
@@ -784,9 +784,9 @@ summary {
   width: min(720px, calc(100vw - 48px));
   max-height: min(760px, calc(100vh - 48px));
   overflow: auto;
-  border: 1px solid #3a4656;
+  border: 1px solid var(--border-strong);
   border-radius: 14px;
-  background: #12171e;
+  background: var(--bg-surface);
   padding: 18px 22px 22px;
   box-shadow: 0 28px 100px rgba(0, 0, 0, 0.5);
 }
@@ -800,7 +800,7 @@ summary {
 
 .settings-heading h3 {
   margin: 0;
-  color: #e1e6ed;
+  color: var(--text-primary);
   font-size: 18px;
 }
 
@@ -808,10 +808,10 @@ summary {
   width: 30px;
   height: 30px;
   font-size: 16px;
-  color: #8793a2;
+  color: var(--text-muted);
 }
 
 .settings-close:hover {
-  background: #232b36;
-  color: #e0a7ad;
+  background: var(--bg-tinted);
+  color: var(--error-bright);
 }

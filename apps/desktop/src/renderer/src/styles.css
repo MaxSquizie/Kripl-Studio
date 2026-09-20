@@ -125,14 +125,14 @@ button {
 }
 
 .window-control {
+  display: grid;
+  place-items: center;
   width: 42px;
   height: 38px;
   border: none;
   border-radius: 0;
   background: transparent;
   color: var(--info);
-  font-size: 12px;
-  line-height: 1;
   cursor: pointer;
 }
 

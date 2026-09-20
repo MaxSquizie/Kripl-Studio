@@ -8,32 +8,32 @@
    * colors (error/warning/info) are independent of the brand hue.
    */
 
-  /* Brand */
-  --kripl-accent: #6fb579;
-  --kripl-accent-bright: #83c180;
-  --kripl-accent-dim: #3d6b52;
+  /* Brand — rich emerald, deep forest for gradients */
+  --kripl-accent: #3fa876;
+  --kripl-accent-bright: #5ecb96;
+  --kripl-accent-dim: #2c6e4d;
 
-  /* Surfaces (dark, green-cast) */
-  --bg-app: #0c110f;
-  --bg-surface: #121815;
-  --bg-raised: #171e1a;
-  --bg-overlay: #1d2621;
-  --bg-tinted: #243029;
+  /* Surfaces — neutral charcoal with a whisper of green */
+  --bg-app: #0e1211;
+  --bg-surface: #151a19;
+  --bg-raised: #1b2120;
+  --bg-overlay: #212827;
+  --bg-tinted: #283130;
 
   /* Borders */
-  --border-subtle: #2c3831;
-  --border-strong: #3a463f;
-  --border-bright: #55645c;
+  --border-subtle: #303a39;
+  --border-strong: #45514f;
+  --border-bright: #6b7876;
 
   /* Text */
-  --text-primary: #e3e9e4;
-  --text-secondary: #a7b3ab;
-  --text-muted: #7d8a82;
-  --text-faint: #5f6d65;
+  --text-primary: #e8edec;
+  --text-secondary: #b0bab8;
+  --text-muted: #8a9694;
+  --text-faint: #6d7a78;
 
   /* Semantic — success shares the brand family */
-  --success: #8fc69c;
-  --success-dim: #5f8a72;
+  --success: #6fce9b;
+  --success-dim: #458f6d;
 
   /* Semantic — error */
   --error: #d9878c;

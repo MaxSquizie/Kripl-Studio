@@ -99,6 +99,8 @@ type ReasoningStep =
  *  reasoning text → tool call → reasoning text → … */
 interface ReasoningBlock {
   steps: ReasoningStep[];
+  /** Wall-clock time the agent spent on this activity, if measured. */
+  durationMs?: number;
 }
 
 interface MessageItem {
@@ -187,17 +189,12 @@ function TokenRing({ used, limit }: { used: number; limit?: number | undefined }
   );
 }
 
-/** One-line preview for the collapsed reasoning block. */
-function reasoningPreview(block: ReasoningBlock): string {
-  const text =
-    block.steps.find(
-      (step): step is { kind: "thinking"; text: string } =>
-        step.kind === "thinking" && step.text.trim() !== ""
-    )?.text ?? "";
-  const line = text.split("\n").find((candidate) => candidate.trim()) ?? "";
-  const trimmed = line.trim();
-  if (trimmed.length <= 64) return trimmed;
-  return `${trimmed.slice(0, 64)}…`;
+/** Stopwatch for the collapsed reasoning block: “3м 12с” or just “45с”. */
+function formatReasoningDuration(ms: number): string {
+  const totalSeconds = Math.round(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}м ${seconds}с` : `${seconds}с`;
 }
 
 function payloadPreview(payload: unknown): string {
@@ -273,6 +270,9 @@ export function App() {
   // tool calls interleaved); folded into the answer bubble as a collapsible
   // "Рассуждение" block when that message appears.
   const turnActivityRef = useRef<ReasoningStep[]>([]);
+  // Wall-clock span of the pending activity (first step → last event).
+  const activityStartRef = useRef<number | null>(null);
+  const activityEndRef = useRef<number | null>(null);
   // Assistant message ids created during the current run (for tok/s).
   const runAssistantIdsRef = useRef<Set<string>>(new Set());
   // A tool call happened after the last assistant bubble was created: the next
@@ -412,6 +412,7 @@ export function App() {
       }
 
       if (event.type === "agent.stream" && event.channel === "thinking") {
+        touchActivity();
         // Reasoning accumulates across the whole run: a new block never
         // erases what was already written between tool calls.
         const steps = turnActivityRef.current;
@@ -582,6 +583,7 @@ export function App() {
         };
         // Mirror the tool call into the turn activity for the reasoning block,
         // keeping its position relative to the surrounding reasoning text.
+        touchActivity();
         const steps = turnActivityRef.current;
         const toolIndex = steps.findIndex(
           (step) => step.kind === "tool" && step.tool.callId === event.callId
@@ -1248,6 +1250,13 @@ export function App() {
     setAttachments((current) => current.filter((_file, i) => i !== index));
   }
 
+  /** Mark that reasoning/tool activity is happening right now. */
+  function touchActivity(): void {
+    const now = Date.now();
+    if (activityStartRef.current === null) activityStartRef.current = now;
+    activityEndRef.current = now;
+  }
+
   /** Snapshot the activity accumulated so far and reset the accumulator. */
   function takeTurnActivity(): ReasoningBlock | null {
     const steps = turnActivityRef.current.filter(
@@ -1257,7 +1266,14 @@ export function App() {
     turnActivityRef.current = [];
     setLiveSteps(null);
     if (steps.length === 0) return null;
-    return { steps };
+    const start = activityStartRef.current;
+    const end = activityEndRef.current ?? start;
+    activityStartRef.current = null;
+    activityEndRef.current = null;
+    return {
+      steps,
+      ...(start !== null && end !== null ? { durationMs: Math.max(0, end - start) } : {})
+    };
   }
 
   /** Drop pending activity (turn aborted or a new prompt starts). */
@@ -1265,6 +1281,8 @@ export function App() {
     turnActivityRef.current = [];
     runAssistantIdsRef.current = new Set();
     toolSinceMessageRef.current = false;
+    activityStartRef.current = null;
+    activityEndRef.current = null;
     setLiveSteps(null);
   }
 
@@ -1313,10 +1331,13 @@ export function App() {
             for (let i = next.length - 1; i >= 0; i -= 1) {
               const prev = next[i];
               if (prev && prev.kind === "message" && prev.role === "assistant") {
+                const mergedDuration =
+                  (prev.reasoning?.durationMs ?? 0) + (item.reasoning.durationMs ?? 0);
                 next[i] = {
                   ...prev,
                   reasoning: {
-                    steps: [...(prev.reasoning?.steps ?? []), ...item.reasoning.steps]
+                    steps: [...(prev.reasoning?.steps ?? []), ...item.reasoning.steps],
+                    ...(mergedDuration > 0 ? { durationMs: mergedDuration } : {})
                   }
                 };
                 break;
@@ -1540,8 +1561,10 @@ export function App() {
                           summary={
                             <>
                               <span>Рассуждение</span>
-                              {reasoningPreview(item.reasoning) && (
-                                <span className="reasoning-preview">{reasoningPreview(item.reasoning)}</span>
+                              {item.reasoning.durationMs !== undefined && (
+                                <span className="reasoning-duration">
+                                  {formatReasoningDuration(item.reasoning.durationMs)}
+                                </span>
                               )}
                               <span className="chevrons" aria-hidden="true">
                                 <svg className="chevron-down" width="14" height="9" viewBox="0 0 14 9" fill="none">

@@ -66,14 +66,14 @@
   display: none;
 }
 
-.reasoning-preview {
+/* Stopwatch next to the “Рассуждение” title. */
+.reasoning-duration {
   flex: 1;
   min-width: 0;
   color: var(--border-bright);
   font-size: 10px;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
 }
 
 .chevrons {

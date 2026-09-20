@@ -1759,6 +1759,8 @@ button {
   display: flex;
   align-items: center;
   gap: 7px;
+  /* ~1.5x the natural “K Agent” width so the lone tab does not look cramped. */
+  min-width: 96px;
   padding: 0 12px;
   cursor: pointer;
 }

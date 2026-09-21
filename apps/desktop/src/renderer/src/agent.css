@@ -840,15 +840,15 @@ summary {
   display: grid;
 }
 
-/* Settings dialog (replaces the right-side inspector) */
+/* Settings dialog — styled like a stack of right-rail tabs. */
 .settings-dialog {
   width: min(720px, calc(100vw - 48px));
   max-height: min(760px, calc(100vh - 48px));
   overflow: auto;
-  border: 1px solid var(--border-strong);
-  border-radius: 14px;
+  border: none;
+  border-radius: 0;
   background: var(--bg-surface);
-  padding: 18px 22px 22px;
+  padding: 0;
   box-shadow: 0 28px 100px rgba(0, 0, 0, 0.5);
 }
 
@@ -856,19 +856,39 @@ summary {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 6px;
+  min-height: 26px;
+  margin-bottom: 0;
+  padding: 12px 14px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .settings-heading h3 {
   margin: 0;
-  color: var(--text-primary);
-  font-size: 18px;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+
+/* Inner sections are flat like the rail tabs, split by hairlines. */
+.settings-dialog > .status-card {
+  margin: 0;
+  border: none;
+  border-top: 1px solid var(--bg-tinted);
+  border-radius: 0;
+  background: var(--bg-surface);
+  padding: 12px 14px;
 }
 
 .settings-close {
-  width: 30px;
-  height: 30px;
-  font-size: 16px;
+  width: 26px;
+  height: 26px;
+  font-size: 14px;
   color: var(--text-muted);
 }
 

@@ -98,10 +98,24 @@
   opacity: 1;
 }
 
-.message-tokps {
-  color: var(--text-faint);
+/* Name + live metrics sit together on the left; actions stay right. */
+.message-role-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.message-stats {
+  display: inline-flex;
+  gap: 8px;
   text-transform: none;
   letter-spacing: 0;
+}
+
+.message-tokps,
+.message-tokens {
+  color: var(--text-faint);
   font-size: 10px;
   font-weight: 600;
 }

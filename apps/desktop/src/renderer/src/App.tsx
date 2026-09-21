@@ -1857,17 +1857,31 @@ export function App() {
                   item.kind === "message" ? (
                     <article key={item.id} className={`chat-message ${item.role}`}>
                       <div className="message-role">
-                        <span>{item.role === "user" ? "You" : item.role === "assistant" ? "Kripl" : "System"}</span>
-                        {(() => {
-                          const tokps =
-                            item.role !== "assistant"
-                              ? undefined
-                              : item.tokps ??
-                                (item.id === lastAssistantId ? tokensPerSecond : undefined);
-                          return tokps !== undefined ? (
-                            <span className="message-tokps">{tokps} tok/s</span>
-                          ) : null;
-                        })()}
+                        <span className="message-role-left">
+                          <span>{item.role === "user" ? "You" : item.role === "assistant" ? "Kripl" : "System"}</span>
+                          {item.role === "assistant" && (
+                            <span className="message-stats">
+                              {(() => {
+                                const tokps =
+                                  item.tokps ??
+                                  (item.id === lastAssistantId
+                                    ? tokensPerSecond
+                                    : undefined);
+                                return tokps !== undefined ? (
+                                  <span className="message-tokps">{Math.round(tokps)} t/s</span>
+                                ) : null;
+                              })()}
+                              {item.text.trim() !== "" && (
+                                <span
+                                  className="message-tokens"
+                                  title="Оценка токенов в сообщении (≈4 символа на токен)"
+                                >
+                                  ≈{formatTokens(Math.max(1, Math.round(item.text.length / 4)))}
+                                </span>
+                              )}
+                            </span>
+                          )}
+                        </span>
                         {item.role === "assistant" && (
                           <span className="message-actions">
                             {item.text.trim() !== "" && (

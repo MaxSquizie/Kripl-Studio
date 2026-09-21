@@ -1,4 +1,4 @@
-import type { AgentEvent, AttachedFile, AgentInteractionResponse, AgentSessionSearchHit, AgentSessionSnapshot, AgentSessionSummary, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
+import type { AgentEvent, AgentStatus, AttachedFile, AgentInteractionResponse, AgentSessionSearchHit, AgentSessionSnapshot, AgentSessionSummary, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
 import { contextBridge, ipcRenderer } from "electron";
 
 const IPC = {
@@ -33,6 +33,8 @@ const IPC = {
   agentRenameSession: "kripl:agent-rename-session",
   agentSessionsChanged: "kripl:agent-sessions-changed",
   agentStart: "kripl:agent-start",
+  agentAttach: "kripl:agent-attach",
+  agentDeleteSession: "kripl:agent-delete-session",
   agentSessionSnapshot: "kripl:agent-session-snapshot",
   agentExportSession: "kripl:agent-export-session",
   agentSearchSessions: "kripl:agent-search-sessions",
@@ -189,7 +191,18 @@ const api = {
   },
 
   startAgent: (request: { endpoint: string; modelId: string; sessionPath?: string }) =>
-    ipcRenderer.invoke(IPC.agentStart, request) as Promise<ActionResult>,
+    ipcRenderer.invoke(
+      IPC.agentStart,
+      request
+    ) as Promise<ActionResult & { agentId?: number }>,
+
+  attachAgent: (sessionPath: string) =>
+    ipcRenderer.invoke(IPC.agentAttach, sessionPath) as Promise<
+      ActionResult & { agentId?: number; status?: AgentStatus }
+    >,
+
+  deleteAgentSession: (sessionPath: string) =>
+    ipcRenderer.invoke(IPC.agentDeleteSession, sessionPath) as Promise<ActionResult>,
 
   getAgentSessionSnapshot: () =>
     ipcRenderer.invoke(IPC.agentSessionSnapshot) as Promise<AgentSessionSnapshot | null>,

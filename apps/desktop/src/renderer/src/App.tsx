@@ -1,7 +1,7 @@
 import type { AgentEvent, AttachedFile, AgentInteractionRequest, AgentInteractionResponse, AgentSessionSearchHit, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, ContextInspectorSnapshot, DesktopRuntimeSettings, DesktopUiState, RecentProject, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceEntry, WorkspaceFilePreview, WorkspaceGitStatus } from "@kripl/core";
 import { cleanAssistantToolText } from "@kripl/core";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { ClipboardEvent } from "react";
+import type { ClipboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import { WorkspaceContent, activeWorkspacePath, type WorkspaceDocumentView, type WorkspaceEditorRevealTarget, type WorkspaceView } from "./WorkspaceContent";
 import { WorkspaceTabs, upsertWorkspaceTab, workspaceViewKey } from "./WorkspaceTabs";
@@ -17,6 +17,7 @@ import kriplCodingLoop from "./assets/kripl-coding.mp4";
 import { Markdown, CopyIconButton } from "./Markdown";
 import { WorkspaceSearchPalette, type WorkspaceSearchMode } from "./WorkspaceSearchPalette";
 import { CommandPalette, type CommandItem } from "./CommandPalette";
+import { ContextMenu, type ContextMenuState } from "./ContextMenu";
 import { ToastStack, type ToastItem, type ToastKind } from "./Toasts";
 
 function formatBytes(size: number): string {
@@ -145,6 +146,8 @@ interface AgentBinding {
   endpoint: string;
   modelId: string;
   sessionPath: string;
+  // Runtime id of the live agent process (background agents keep their own).
+  agentId?: number;
 }
 
 type ProbeState =
@@ -253,8 +256,18 @@ export function App() {
   const [probe, setProbe] = useState<ProbeState>({ status: "idle", models: [] });
   const [selectedModel, setSelectedModel] = useState(() => readStored("kripl.selectedModel", ""));
   const [agentStatus, setAgentStatus] = useState<AgentStatus>("idle");
+  // Mirrored for async waits (e.g. interrupt-then-resend while generating).
+  const agentStatusRef = useRef(agentStatus);
+  useEffect(() => {
+    agentStatusRef.current = agentStatus;
+  }, [agentStatus]);
   const [agentError, setAgentError] = useState("");
   const [binding, setBinding] = useState<AgentBinding | null>(null);
+  // Mirrored for the one-shot agent event subscription (background filter).
+  const bindingAgentIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    bindingAgentIdRef.current = binding?.agentId ?? null;
+  }, [binding]);
   const [composerText, setComposerText] = useState("");
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   // User message being edited for a resend (replaces it and everything after).
@@ -326,6 +339,8 @@ export function App() {
 
   // Transient top-right notifications (file saved, model probe, …).
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  // Right-click action menu for chat / project rows.
+  const [rowMenu, setRowMenu] = useState<ContextMenuState | null>(null);
   const toastIdRef = useRef(0);
 
   function pushToast(kind: ToastKind, message: string) {
@@ -533,7 +548,17 @@ export function App() {
   }, [workspace, workspaceView]);
 
   useEffect(() => {
-    return window.kripl.onAgentEvent((event: AgentEvent) => {
+    return window.kripl.onAgentEvent((rawEvent: AgentEvent) => {
+      // Drop events from other (background) agent runtimes.
+      const event = rawEvent as AgentEvent & { agentId?: number };
+      const boundId = bindingAgentIdRef.current;
+      if (
+        boundId !== null &&
+        typeof event.agentId === "number" &&
+        event.agentId !== boundId
+      ) {
+        return;
+      }
       if (event.type === "agent.status") {
         setAgentStatus(event.status);
         if (event.status === "running" && runStartedAtRef.current === null) {
@@ -860,7 +885,7 @@ export function App() {
         id: `resume-${session.path}`,
         label: `Resume chat: ${session.name && session.name !== basename(session.path) ? session.name : session.firstMessage ?? basename(session.path)}`,
         hint: "session",
-        run: () => void startAgent(session.path)
+        run: () => void resumeSession(session.path)
       });
     }
 
@@ -1464,12 +1489,53 @@ export function App() {
       workspacePath: workspace.path,
       endpoint,
       modelId: selectedModel,
-      sessionPath: resumeSessionPath ?? ""
+      sessionPath: resumeSessionPath ?? "",
+      ...(typeof result.agentId === "number" ? { agentId: result.agentId } : {})
     };
     setBinding(nextBinding);
     writeStored("kripl.lastBinding", JSON.stringify(nextBinding));
     setAgentStatus("ready");
     void refreshSessions();
+  }
+
+  /**
+   * Switch to a saved chat. If its agent is still running in the background,
+   * rebind without restarting; otherwise start it fresh.
+   */
+  async function resumeSession(sessionPath: string): Promise<void> {
+    if (!workspace || !modelReady || !selectedModel) return;
+
+    const attached = await window.kripl.attachAgent(sessionPath);
+    if (attached.ok && typeof attached.agentId === "number") {
+      setEditingMessageId(null);
+      discardTurnActivity();
+      assistantMessageId.current = null;
+      nearBottomRef.current = true;
+      setAwayFromBottom(false);
+
+      const snapshot = await window.kripl.getAgentSessionSnapshot().catch(() => null);
+      if (snapshot) hydrateSessionSnapshot(snapshot);
+
+      const nextBinding: AgentBinding = {
+        workspacePath: workspace.path,
+        endpoint,
+        modelId: selectedModel,
+        sessionPath,
+        agentId: attached.agentId
+      };
+      setBinding(nextBinding);
+      writeStored("kripl.lastBinding", JSON.stringify(nextBinding));
+      if (attached.status && attached.status !== "ready") {
+        setAgentStatus(attached.status);
+        if (attached.status === "running" && runStartedAtRef.current === null) {
+          runStartedAtRef.current = Date.now();
+        }
+      }
+      void refreshSessions();
+      return;
+    }
+
+    await startAgent(sessionPath);
   }
 
   async function addAttachments(paths: string[]) {
@@ -1550,6 +1616,67 @@ export function App() {
     anchor.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 5000);
     pushToast("success", `Exported “${title}” as Markdown`);
+  }
+
+  async function deleteSession(session: AgentSessionSummary): Promise<void> {
+    const result = await window.kripl.deleteAgentSession(session.path);
+    if (!result.ok) {
+      pushToast("error", "Не удалось удалить чат.");
+      return;
+    }
+    // If the deleted chat was open, reset the agent UI for a clean restart.
+    if (binding?.sessionPath === session.path) {
+      setBinding(null);
+      discardTurnActivity();
+      assistantMessageId.current = null;
+      runStartedAtRef.current = null;
+      setAgentStatus("idle");
+      setFeed([]);
+    }
+    pushToast("success", "Чат удалён.");
+    void refreshSessions();
+  }
+
+  function openSessionMenu(event: ReactMouseEvent, session: AgentSessionSummary): void {
+    event.preventDefault();
+    setRowMenu({
+      x: event.clientX,
+      y: event.clientY,
+      items: [
+        {
+          label: "Переименовать",
+          run: () => {
+            const current =
+              session.name && session.name !== basename(session.path)
+                ? session.name
+                : "";
+            setRenamingPath(session.path);
+            setRenameValue(current);
+          }
+        },
+        { label: "Экспортировать в Markdown", run: () => void exportSessionMarkdown(session) },
+        {
+          label: "Удалить чат",
+          danger: true,
+          run: () => void deleteSession(session)
+        }
+      ]
+    });
+  }
+
+  function openProjectMenu(event: ReactMouseEvent, project: RecentProject): void {
+    event.preventDefault();
+    setRowMenu({
+      x: event.clientX,
+      y: event.clientY,
+      items: [
+        {
+          label: "Убрать из списка",
+          danger: true,
+          run: () => void forgetRecentProject(project.path)
+        }
+      ]
+    });
   }
 
   async function commitSessionRename(path: string) {
@@ -1754,11 +1881,36 @@ export function App() {
    * after it, and send. Attachment metadata from the original prompt is not
    * restored — only the edited text goes out.
    */
+  // Poll the mirrored status until the runtime reports ready again.
+  function waitForAgentReady(timeoutMs = 15_000): Promise<boolean> {
+    if (agentStatusRef.current === "ready") return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const startedAt = Date.now();
+      const timer = window.setInterval(() => {
+        const ready = agentStatusRef.current === "ready";
+        if (ready || Date.now() - startedAt > timeoutMs) {
+          window.clearInterval(timer);
+          resolve(ready);
+        }
+      }, 100);
+    });
+  }
+
   async function resubmitEdited(id: string, newText: string): Promise<void> {
     const trimmed = newText.trim();
-    if (!trimmed || !canSend) return;
+    if (!trimmed || !binding) return;
     setEditingMessageId(null);
     discardTurnActivity();
+
+    // Editing interrupts an in-flight run and restarts it right away.
+    if (agentStatusRef.current === "running" || agentStatusRef.current === "stopping") {
+      await window.kripl.abortAgent();
+      const ready = await waitForAgentReady();
+      if (!ready) {
+        setAgentError("Агент не вернулся в готовность после прерывания.");
+        return;
+      }
+    }
 
     setFeed((current) => {
       const index = current.findIndex((item) => item.kind === "message" && item.id === id);
@@ -2109,7 +2261,7 @@ export function App() {
                               type="button"
                               className="send-button"
                               title="Отправить заново (Enter)"
-                              disabled={!editValue.trim() || !canSend}
+                              disabled={!editValue.trim()}
                               onClick={() => void resubmitEdited(item.id, editValue)}
                             >
                               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -2478,7 +2630,7 @@ export function App() {
                           type="button"
                           className="session-hit"
                           title={hit.snippet}
-                          onClick={() => void startAgent(hit.sessionPath)}
+                          onClick={() => void resumeSession(hit.sessionPath)}
                         >
                           <span className="session-name">
                             {hit.sessionName ?? basename(hit.sessionPath)}
@@ -2505,13 +2657,14 @@ export function App() {
                         className={
                           "session-row" + (binding?.sessionPath === session.path ? " active" : "")
                         }
+                        onContextMenu={(event) => openSessionMenu(event, session)}
                       >
                         <button
                           type="button"
                           className="session-resume"
                           disabled={!canStartAgent}
                           title={`Resume ${session.name ?? basename(session.path)}`}
-                          onClick={() => void startAgent(session.path)}
+                          onClick={() => void resumeSession(session.path)}
                         >
                           <span className="session-name">
                             {session.name && session.name !== basename(session.path)
@@ -2534,53 +2687,7 @@ export function App() {
                               else if (event.key === "Escape") setRenamingPath(null);
                             }}
                           />
-                        ) : (
-                          <button
-                            type="button"
-                            className="icon-button session-rename"
-                            title="Rename this chat"
-                            onClick={() => {
-                              const current =
-                                session.name && session.name !== basename(session.path)
-                                  ? session.name
-                                  : "";
-                              setRenamingPath(session.path);
-                              setRenameValue(current);
-                            }}
-                          >
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                              <path
-                                d="M16.7 3.8a2.3 2.3 0 0 1 3.5 3L8.5 18.5l-4.6 1.3 1.3-4.6L16.7 3.8z"
-                                stroke="currentColor"
-                                strokeWidth="1.8"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="icon-button session-export"
-                          title="Export this chat as Markdown"
-                          onClick={() => void exportSessionMarkdown(session)}
-                        >
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                            <path
-                              d="M12 3.5v10m0 0L7.8 9.3m4.2 4.2l4.2-4.2"
-                              stroke="currentColor"
-                              strokeWidth="1.8"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                            <path
-                              d="M5 17.5v1a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1"
-                              stroke="currentColor"
-                              strokeWidth="1.8"
-                              strokeLinecap="round"
-                            />
-                          </svg>
-                        </button>
+                        ) : null}
                       </div>
                     ))}
                 </div>
@@ -2614,7 +2721,7 @@ export function App() {
             projects={recentProjects}
             currentPath={workspace?.path}
             onOpen={(path) => void openRecentProject(path)}
-            onForget={(path) => void forgetRecentProject(path)}
+            onContextMenu={(project, event) => openProjectMenu(event, project)}
           />
 
           {/* Branding loop pinned to the bottom of the rail. */}
@@ -2781,6 +2888,7 @@ export function App() {
       )}
 
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
+      <ContextMenu state={rowMenu} onClose={() => setRowMenu(null)} />
 
       <TerminalPanel
         visible={terminalVisible}

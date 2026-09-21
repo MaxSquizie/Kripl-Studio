@@ -21,7 +21,7 @@ import {
   type MenuItemConstructorOptions
 } from "electron";
 import { autoUpdater } from "electron-updater";
-import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserRuntime } from "./browser-runtime.js";
@@ -55,6 +55,8 @@ const IPC = {
   probeLocalModels: "kripl:probe-local-models",
   agentSessions: "kripl:agent-sessions",
   agentStart: "kripl:agent-start",
+  agentAttach: "kripl:agent-attach",
+  agentDeleteSession: "kripl:agent-delete-session",
   agentSessionSnapshot: "kripl:agent-session-snapshot",
   agentExportSession: "kripl:agent-export-session",
   agentSearchSessions: "kripl:agent-search-sessions",
@@ -99,6 +101,39 @@ let activeAgent: PiAgentRuntime | undefined;
 let activeAgentUnsubscribe: (() => void) | undefined;
 let activeAgentStatus: AgentStatus = "idle";
 let activeAgentModel: { endpoint: string; modelId: string } | undefined;
+
+// Parked agents keep running in the background while the user works with a
+// different chat or project. Keyed by runtime id.
+interface BackgroundAgentSlot {
+  agent: PiAgentRuntime;
+  model?: { endpoint: string; modelId: string };
+  // Workspace the run belongs to (may differ after a project switch).
+  workspacePath?: string;
+  status: AgentStatus;
+  unsubscribe: () => void;
+}
+const backgroundAgents = new Map<number, BackgroundAgentSlot>();
+
+// Stable id per runtime so the renderer can ignore events from other agents.
+let nextAgentId = 1;
+const agentIds = new Map<PiAgentRuntime, number>();
+function agentIdOf(agent: PiAgentRuntime): number {
+  let id = agentIds.get(agent);
+  if (id === undefined) {
+    id = nextAgentId++;
+    agentIds.set(agent, id);
+  }
+  return id;
+}
+
+async function liveSessionFile(agent: PiAgentRuntime): Promise<string | null> {
+  try {
+    const snapshot = await agent.getSessionSnapshot();
+    return snapshot.sessionFile ?? null;
+  } catch {
+    return null;
+  }
+}
 let browserRuntime: BrowserRuntime | undefined;
 let toolBridgeServer: ToolBridgeServer | undefined;
 let browserUnsubscribe: (() => void) | undefined;
@@ -439,10 +474,9 @@ async function openWorkspacePath(
     throw new Error("Workspace path is not a directory.");
   }
 
-  await Promise.all([
-    disposeActiveAgent(),
-    terminalRuntime.kill()
-  ]);
+  // A running agent keeps working in the background after a project switch.
+  parkActiveAgentInBackground();
+  await terminalRuntime.kill();
 
   const descriptor = await workspaceRuntime.open(path);
   const store = requireDesktopStateStore();
@@ -521,11 +555,30 @@ async function disposeActiveAgent(): Promise<void> {
   activeAgentStatus = "stopped";
 
   if (agent) {
+    agentIds.delete(agent);
     await agent.dispose();
   }
 }
 
-function forwardAgentEvent(target: Electron.WebContents, event: AgentEvent): void {
+function disposeBackgroundAgent(id: number): void {
+  const slot = backgroundAgents.get(id);
+  if (!slot) return;
+  backgroundAgents.delete(id);
+  slot.unsubscribe();
+  agentIds.delete(slot.agent);
+  void slot.agent.dispose().catch(() => {});
+}
+
+function disposeAllAgents(): Promise<void> {
+  for (const id of [...backgroundAgents.keys()]) disposeBackgroundAgent(id);
+  return disposeActiveAgent();
+}
+
+function forwardAgentEvent(
+  target: Electron.WebContents | null,
+  event: AgentEvent,
+  agentId?: number
+): void {
   void contextRuntime.record(event);
 
   if (event.type === "agent.status") {
@@ -535,8 +588,86 @@ function forwardAgentEvent(target: Electron.WebContents, event: AgentEvent): voi
     }
   }
 
-  if (event.type === "agent.raw" || target.isDestroyed()) return;
-  target.send(IPC.agentEvent, event);
+  if (event.type === "agent.raw" || !target || target.isDestroyed()) return;
+  // Tag with the runtime id so the renderer can drop background-agent events.
+  target.send(IPC.agentEvent, agentId !== undefined ? { ...event, agentId } : event);
+}
+
+/** Park the active agent so it keeps running while another chat is open. */
+function parkActiveAgentInBackground(): void {
+  const agent = activeAgent;
+  if (!agent) return;
+  const id = agentIdOf(agent);
+  backgroundAgents.delete(id); // re-park replaces a stale slot
+  void rememberActiveAgentSession();
+  activeAgentUnsubscribe?.();
+  activeAgentUnsubscribe = undefined;
+  const parkedWorkspace = workspaceRuntime.descriptor();
+  const slot: BackgroundAgentSlot = {
+    agent,
+    ...(activeAgentModel ? { model: activeAgentModel } : {}),
+    ...(parkedWorkspace?.path ? { workspacePath: parkedWorkspace.path } : {}),
+    status: activeAgentStatus,
+    unsubscribe: () => {}
+  };
+  slot.unsubscribe = agent.subscribe((event) => {
+    if (event.type === "agent.status") {
+      slot.status = event.status;
+      if (event.status === "ready" || event.status === "stopped") {
+        void rememberBackgroundSession(slot);
+        broadcastToWindow(IPC.agentSessionsChanged, undefined);
+      }
+    }
+    forwardAgentEvent(eventSender(), event, id);
+  });
+  backgroundAgents.set(id, slot);
+
+  activeAgent = undefined;
+  activeAgentModel = undefined;
+  activeAgentStatus = "idle";
+}
+
+async function rememberBackgroundSession(slot: BackgroundAgentSlot): Promise<void> {
+  const workspacePath = slot.workspacePath ?? workspaceRuntime.descriptor()?.path;
+  if (!workspacePath) return;
+  try {
+    const file = await liveSessionFile(slot.agent);
+    if (!file) return;
+    const info = await stat(file);
+    if (!info.isFile()) return;
+    await requireDesktopStateStore().rememberSession(workspacePath, file);
+  } catch {
+    // Best-effort; must not break the background run.
+  }
+}
+
+/** Promote a parked agent back to active. Returns false when unknown. */
+function promoteBackgroundAgent(id: number): boolean {
+  const slot = backgroundAgents.get(id);
+  if (!slot) return false;
+  if (activeAgent && agentIdOf(activeAgent) !== id) {
+    parkActiveAgentInBackground();
+  }
+  backgroundAgents.delete(id);
+  slot.unsubscribe();
+
+  activeAgent = slot.agent;
+  if (slot.model) activeAgentModel = slot.model;
+  activeAgentStatus = slot.status === "stopped" ? "ready" : slot.status;
+  activeAgentUnsubscribe?.();
+  activeAgentUnsubscribe = slot.agent.subscribe((event) => {
+    forwardAgentEvent(eventSender(), event, id);
+    if (event.type === "agent.turn" && event.phase === "completed") {
+      void autoNameActiveSession();
+    }
+  });
+  return true;
+}
+
+function eventSender(): Electron.WebContents | null {
+  const window = BrowserWindow.getAllWindows()[0];
+  if (window && !window.webContents.isDestroyed()) return window.webContents;
+  return null;
 }
 
 function initializeTerminalForwarding(window: BrowserWindow): void {
@@ -825,7 +956,8 @@ function registerIpc(): void {
     async (_event, value: unknown): Promise<DesktopRuntimeSettings> => {
       const runtime = parseDesktopRuntimeSettings(value);
 
-      await disposeActiveAgent();
+      // Runtime settings affect every agent, including background ones.
+      await disposeAllAgents();
       await requireDesktopStateStore().setRuntimeSettings(runtime);
       browserRuntime?.setNetworkMode(runtime.networkMode);
 
@@ -1098,7 +1230,12 @@ function registerIpc(): void {
     }
   });
 
-  ipcMain.handle(IPC.agentStart, async (event, request: unknown): Promise<ActionResult> => {
+  ipcMain.handle(
+    IPC.agentStart,
+    async (
+      event,
+      request: unknown
+    ): Promise<ActionResult & { agentId?: number; status?: AgentStatus }> => {
     if (!isAgentStartRequest(request)) {
       return { ok: false, error: "Invalid agent start request." };
     }
@@ -1111,7 +1248,19 @@ function registerIpc(): void {
       const localModel = await validateLocalModel(request.endpoint, request.modelId);
       const sessionPath = await validatedSessionPath(workspace.path, request.sessionPath);
 
-      await disposeActiveAgent();
+      // A running agent keeps working in the background unless we are
+      // restarting its own session (clean restart is expected then).
+      if (activeAgent) {
+        const currentFile = await liveSessionFile(activeAgent);
+        const sameSession =
+          Boolean(currentFile && request.sessionPath) &&
+          currentFile === request.sessionPath;
+        if (sameSession) {
+          await disposeActiveAgent();
+        } else {
+          parkActiveAgentInBackground();
+        }
+      }
 
       const toolBridge = toolBridgeServer?.getConnection();
       if (!toolBridge) {
@@ -1146,8 +1295,9 @@ function registerIpc(): void {
       activeAgent = agent;
       activeAgentModel = { endpoint: localModel.endpoint, modelId: localModel.modelId };
       activeAgentStatus = "starting";
+      const agentId = agentIdOf(agent);
       activeAgentUnsubscribe = agent.subscribe((agentEvent) => {
-        forwardAgentEvent(event.sender, agentEvent);
+        forwardAgentEvent(event.sender, agentEvent, agentId);
         if (agentEvent.type === "agent.turn" && agentEvent.phase === "completed") {
           void autoNameActiveSession();
         }
@@ -1158,9 +1308,59 @@ function registerIpc(): void {
         ...(sessionPath ? { sessionPath } : {})
       });
       await rememberActiveAgentSession();
-      return { ok: true };
+      return { ok: true, agentId };
     } catch (error) {
       await disposeActiveAgent();
+      return actionError(error);
+    }
+  });
+
+  // Rebind the UI to an agent that is still running in the background.
+  ipcMain.handle(
+    IPC.agentAttach,
+    async (
+      _event,
+      sessionPath: unknown
+    ): Promise<ActionResult & { agentId?: number; status?: AgentStatus }> => {
+      if (typeof sessionPath !== "string" || !sessionPath) {
+        return { ok: false, error: "Invalid session path." };
+      }
+      const activeFile = activeAgent ? await liveSessionFile(activeAgent) : null;
+      if (activeAgent && activeFile === sessionPath) {
+        return { ok: true, agentId: agentIdOf(activeAgent), status: activeAgentStatus };
+      }
+      for (const [id, slot] of [...backgroundAgents.entries()]) {
+        const file = await liveSessionFile(slot.agent);
+        if (file !== sessionPath) continue;
+        promoteBackgroundAgent(id);
+        return { ok: true, agentId: id, status: activeAgentStatus };
+      }
+      return { ok: false, error: "No running agent for this chat." };
+    }
+  );
+
+  // Delete a saved chat file (and its name entry), stopping any live runtime.
+  ipcMain.handle(IPC.agentDeleteSession, async (_event, sessionPath: unknown): Promise<ActionResult> => {
+    if (typeof sessionPath !== "string" || !sessionPath) {
+      return { ok: false, error: "Invalid session path." };
+    }
+    try {
+      if (activeAgent && (await liveSessionFile(activeAgent)) === sessionPath) {
+        await disposeActiveAgent();
+      }
+      for (const [id, slot] of [...backgroundAgents.entries()]) {
+        if ((await liveSessionFile(slot.agent)) === sessionPath) disposeBackgroundAgent(id);
+      }
+      await unlink(sessionPath).catch(() => {});
+      const names = await loadSessionNames();
+      const key = pathKey(sessionPath);
+      if (names[key]) {
+        delete names[key];
+        await saveSessionNames(names);
+      }
+      broadcastToWindow(IPC.agentSessionsChanged, undefined);
+      return { ok: true };
+    } catch (error) {
       return actionError(error);
     }
   });
@@ -1642,7 +1842,7 @@ app.on("before-quit", () => {
   void contextRuntime.dispose();
   void terminalRuntime.dispose();
   void workspaceRuntime.dispose();
-  void disposeActiveAgent();
+  void disposeAllAgents();
 });
 
 // With the tray, closing the last window keeps the agent alive in the

@@ -882,6 +882,42 @@ button {
   overflow-y: auto;
 }
 
+/* Right-click action menu for chat / project rows. */
+.context-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+}
+
+.context-menu {
+  position: fixed;
+  display: grid;
+  padding: 4px;
+  background: var(--bg-overlay);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+}
+
+.context-item {
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12.5px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.context-item:hover {
+  background: var(--bg-tinted);
+}
+
+.context-item.danger {
+  color: var(--error-bright);
+}
+
 /* Full-text search across saved chats. */
 .session-search {
   width: 100%;

@@ -1,4 +1,5 @@
 import type { RecentProject } from "@kripl/core";
+import type { MouseEvent } from "react";
 import { CollapsibleDetails } from "./CollapsibleDetails";
 
 function formatRelativeTime(timestamp: number): string {
@@ -15,7 +16,7 @@ interface RecentProjectsCardProps {
   projects: RecentProject[];
   currentPath?: string | undefined;
   onOpen(path: string): void;
-  onForget(path: string): void;
+  onContextMenu(project: RecentProject, event: MouseEvent): void;
 }
 
 /** Right-rail card for quick switching between recent repositories. */
@@ -23,7 +24,7 @@ export function RecentProjectsCard({
   projects,
   currentPath,
   onOpen,
-  onForget
+  onContextMenu
 }: RecentProjectsCardProps) {
   const ordered = [...projects].sort((a, b) => b.lastOpenedAt - a.lastOpenedAt);
 
@@ -57,6 +58,7 @@ export function RecentProjectsCard({
                 "recent-project-row" +
                 (currentPath === project.path ? " active" : "")
               }
+              onContextMenu={(event) => onContextMenu(project, event)}
             >
               <button
                 type="button"
@@ -68,14 +70,6 @@ export function RecentProjectsCard({
                 <span className="recent-project-meta">
                   {formatRelativeTime(project.lastOpenedAt)}
                 </span>
-              </button>
-              <button
-                type="button"
-                className="icon-button recent-project-forget"
-                title="Forget this project"
-                onClick={() => onForget(project.path)}
-              >
-                ×
               </button>
             </div>
           ))}

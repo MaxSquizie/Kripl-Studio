@@ -42,7 +42,12 @@ if (!window.kripl) {
 } else {
   // The tray action menu runs in its own tiny frameless window.
   const isTrayMenu = window.location.search.includes("tray-menu=1");
-  if (isTrayMenu) document.body.style.background = "transparent";
+  if (isTrayMenu) {
+    // The window is transparent; the :root background would otherwise show
+    // as square corners around the rounded menu card.
+    document.documentElement.style.background = "transparent";
+    document.body.style.background = "transparent";
+  }
 
   createRoot(root).render(
     <StrictMode>{isTrayMenu ? <TrayMenu /> : <App />}</StrictMode>

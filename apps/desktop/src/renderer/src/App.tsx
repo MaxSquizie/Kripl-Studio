@@ -68,6 +68,27 @@ function writeStored(key: string, value: string): void {
   }
 }
 
+// Last agent binding per workspace, so switching back to a project restores
+// its chat (and reattaches if that agent is still running in the background).
+function loadSavedBindings(): Record<string, AgentBinding> {
+  try {
+    const raw = localStorage.getItem("kripl.lastBindings");
+    return raw ? (JSON.parse(raw) as Record<string, AgentBinding>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function rememberAgentBinding(binding: AgentBinding): void {
+  try {
+    const map = loadSavedBindings();
+    map[binding.workspacePath] = binding;
+    localStorage.setItem("kripl.lastBindings", JSON.stringify(map));
+  } catch {
+    // Best-effort.
+  }
+}
+
 function buildMessageWithAttachments(text: string, files: AttachedFile[]): string {
   const usable = files.filter((file) => !file.error);
   if (usable.length === 0) return text;
@@ -907,29 +928,20 @@ export function App() {
     return items;
   }, [agentStatus, canStartAgent, workspace, terminalVisible, recentProjects, sessions]);
 
-  // Auto-reconnect: if this workspace was bound to the same server/model in a
-  // previous run, start the agent again without any manual steps.
-  const autoStartTried = useRef(false);
+  // Auto-reconnect: when a workspace becomes active (app start or project
+  // switch), rebind its last chat if the server/model selection still matches.
+  const autoStartedWorkspaces = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    if (autoStartTried.current || !workspace || !modelReady) return;
-    let saved: AgentBinding | null = null;
-    try {
-      const raw = localStorage.getItem("kripl.lastBinding");
-      if (raw) saved = JSON.parse(raw) as AgentBinding;
-    } catch {
-      saved = null;
-    }
-    if (
-      !saved ||
-      saved.workspacePath !== workspace.path ||
-      saved.endpoint !== endpoint ||
-      saved.modelId !== selectedModel
-    ) {
+    if (!workspace || !modelReady) return;
+    if (autoStartedWorkspaces.current.has(workspace.path)) return;
+    const saved = loadSavedBindings()[workspace.path];
+    if (!saved || saved.endpoint !== endpoint || saved.modelId !== selectedModel) {
       return;
     }
-    autoStartTried.current = true;
-    void startAgent();
+    autoStartedWorkspaces.current.add(workspace.path);
+    if (saved.sessionPath) void resumeSession(saved.sessionPath);
+    else void startAgent();
   }, [workspace, modelReady]);
 
   const dirtyEditorPaths = useMemo(() => {
@@ -1508,7 +1520,7 @@ export function App() {
       ...(typeof result.agentId === "number" ? { agentId: result.agentId } : {})
     };
     setBinding(nextBinding);
-    writeStored("kripl.lastBinding", JSON.stringify(nextBinding));
+    rememberAgentBinding(nextBinding);
     setAgentStatus("ready");
     void refreshSessions();
   }
@@ -1539,7 +1551,7 @@ export function App() {
         agentId: attached.agentId
       };
       setBinding(nextBinding);
-      writeStored("kripl.lastBinding", JSON.stringify(nextBinding));
+      rememberAgentBinding(nextBinding);
       if (attached.status && attached.status !== "ready") {
         setAgentStatus(attached.status);
         if (attached.status === "running" && runStartedAtRef.current === null) {

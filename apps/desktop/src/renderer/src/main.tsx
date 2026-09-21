@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { TrayMenu } from "./TrayMenu";
 import "./styles.css";
 import "./model-provider.css";
 import "./agent.css";
@@ -39,9 +40,11 @@ if (!window.kripl) {
     </main>
   `;
 } else {
+  // The tray action menu runs in its own tiny frameless window.
+  const isTrayMenu = window.location.search.includes("tray-menu=1");
+  if (isTrayMenu) document.body.style.background = "transparent";
+
   createRoot(root).render(
-    <StrictMode>
-      <App />
-    </StrictMode>
+    <StrictMode>{isTrayMenu ? <TrayMenu /> : <App />}</StrictMode>
   );
 }

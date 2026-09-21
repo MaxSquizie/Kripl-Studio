@@ -10,6 +10,7 @@ const IPC = {
   pickWorkspace: "kripl:pick-workspace",
   desktopBootstrap: "kripl:desktop-bootstrap",
   openRecentProject: "kripl:open-recent-project",
+  trayMenuAction: "kripl:tray-menu-action",
   forgetRecentProject: "kripl:forget-recent-project",
   saveDesktopUi: "kripl:save-desktop-ui",
   saveRuntimeSettings: "kripl:save-runtime-settings",
@@ -205,6 +206,9 @@ const api = {
 
   deleteAgentSession: (sessionPath: string) =>
     ipcRenderer.invoke(IPC.agentDeleteSession, sessionPath) as Promise<ActionResult>,
+
+  trayMenuAction: (action: "show" | "quit" | "close") =>
+    ipcRenderer.invoke(IPC.trayMenuAction, action) as Promise<void>,
 
   listLiveAgents: () =>
     ipcRenderer.invoke(

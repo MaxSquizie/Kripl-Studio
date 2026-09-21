@@ -882,6 +882,52 @@ button {
   overflow-y: auto;
 }
 
+/* Themed tray action menu (frameless transparent window). */
+.tray-menu-root {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: 6px;
+  background: transparent;
+}
+
+.tray-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--bg-overlay);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.tray-menu-item svg {
+  color: var(--kripl-accent-bright);
+}
+
+.tray-menu-item:hover {
+  background: var(--bg-tinted);
+}
+
+.tray-menu-item.danger {
+  color: var(--error-bright);
+}
+
+.tray-menu-item.danger svg {
+  color: var(--error-bright);
+}
+
+.tray-menu-divider {
+  height: 1px;
+  margin: 2px 6px;
+  background: var(--border-strong);
+}
+
 /* Right-click action menu for chat / project rows. */
 .context-menu-backdrop {
   position: fixed;

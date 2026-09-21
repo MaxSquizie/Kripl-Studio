@@ -77,6 +77,7 @@ declare global {
         ActionResult & { agentId?: number; status?: AgentStatus }
       >;
       deleteAgentSession(sessionPath: string): Promise<ActionResult>;
+      trayMenuAction(action: "show" | "quit" | "close"): Promise<void>;
       listLiveAgents(): Promise<Array<{ sessionPath?: string; running: boolean }>>;
       onAgentLiveChanged(
         listener: (live: Array<{ sessionPath?: string; running: boolean }>) => void

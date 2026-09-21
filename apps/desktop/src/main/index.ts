@@ -10,16 +10,7 @@ import {
 } from "@kripl/pi-adapter";
 import { PtyTerminalRuntime } from "@kripl/terminal";
 import { LocalWorkspaceRuntime } from "@kripl/workspace";
-import {
-  app,
-  BrowserWindow,
-  dialog,
-  ipcMain,
-  Menu,
-  nativeImage,
-  Tray,
-  type MenuItemConstructorOptions
-} from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, screen, Tray } from "electron";
 import { autoUpdater } from "electron-updater";
 import { copyFile, mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -34,6 +25,7 @@ const IPC = {
   pickWorkspace: "kripl:pick-workspace",
   desktopBootstrap: "kripl:desktop-bootstrap",
   openRecentProject: "kripl:open-recent-project",
+  trayMenuAction: "kripl:tray-menu-action",
   forgetRecentProject: "kripl:forget-recent-project",
   saveDesktopUi: "kripl:save-desktop-ui",
   saveRuntimeSettings: "kripl:save-runtime-settings",
@@ -798,6 +790,64 @@ function showMainWindow(): void {
   initializeContextForwarding(nextWindow);
 }
 
+// The native Win32 context menu cannot be themed, so the tray action menu
+// is a small frameless renderer window styled like the rest of the app.
+let trayMenuWindow: BrowserWindow | null = null;
+
+function showTrayMenu(x: number, y: number): void {
+  if (trayMenuWindow && !trayMenuWindow.isDestroyed()) {
+    trayMenuWindow.close();
+    trayMenuWindow = null;
+  }
+
+  const width = 216;
+  const height = 92;
+  const display = screen.getDisplayNearestPoint({ x, y });
+  const area = display.workArea;
+  const menuX = Math.min(Math.max(area.x + 4, x - width + 8), area.x + area.width - width - 4);
+  const menuY = Math.min(y + 6, area.y + area.height - height - 4);
+
+  const win = new BrowserWindow({
+    width,
+    height,
+    x: menuX,
+    y: menuY,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    show: false,
+    webPreferences: {
+      preload: join(currentDir, "../preload/index.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+  trayMenuWindow = win;
+
+  if (process.env.ELECTRON_RENDERER_URL) {
+    const separator = process.env.ELECTRON_RENDERER_URL.includes("?") ? "&" : "?";
+    void win.loadURL(`${process.env.ELECTRON_RENDERER_URL}${separator}tray-menu=1`);
+  } else {
+    void win.loadFile(join(currentDir, "../renderer/index.html"), {
+      query: { "tray-menu": "1" }
+    });
+  }
+
+  win.once("ready-to-show", () => {
+    if (!win.isDestroyed()) win.show();
+  });
+  // Clicking anywhere else dismisses the menu.
+  win.on("blur", () => {
+    if (!win.isDestroyed()) win.close();
+  });
+  win.on("closed", () => {
+    trayMenuWindow = null;
+  });
+}
+
 function createTray(): void {
   if (tray) return;
   const icon = nativeImage.createFromPath(
@@ -806,28 +856,20 @@ function createTray(): void {
   tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon.resize({ width: 16, height: 16 }));
   tray.setToolTip("Kripl Studio");
 
-  const menuItem = (
-    name: string,
-    label: string,
-    onClick: () => void
-  ): MenuItemConstructorOptions => {
-    const item: MenuItemConstructorOptions = { label, click: onClick };
-    const icon = nativeImage.createFromPath(join(app.getAppPath(), "resources", name));
-    if (!icon.isEmpty()) item.icon = icon;
-    return item;
-  };
-  // Left click restores the window; right click opens the action menu.
-  tray.on("click", () => showMainWindow());
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      menuItem("tray-menu-show.png", "Show Kripl Studio", () => showMainWindow()),
-      { type: "separator" },
-      menuItem("tray-menu-quit.png", "Quit", () => {
-        isQuitting = true;
-        app.quit();
-      })
-    ])
-  );
+  // Left click restores the window; right click opens the themed action menu.
+  tray.on("click", (event) => {
+    // Electron types this as KeyboardEvent; the real payload carries
+    // button ("left" | "right") and a screen position.
+    const click = event as unknown as {
+      button?: number | string;
+      position?: { x: number; y: number };
+    };
+    if ((click.button === "right" || click.button === 1) && click.position) {
+      showTrayMenu(click.position.x, click.position.y);
+    } else {
+      showMainWindow();
+    }
+  });
 }
 
 function createWindow(): BrowserWindow {
@@ -890,6 +932,17 @@ function registerWindowControls(window: BrowserWindow): void {
 }
 
 function registerIpc(): void {
+  // Actions from the themed tray menu window.
+  ipcMain.handle(IPC.trayMenuAction, (_event, action: unknown): void => {
+    if (action === "show") showMainWindow();
+    else if (action === "quit") {
+      isQuitting = true;
+      app.quit();
+    }
+    const win = trayMenuWindow;
+    if (win && !win.isDestroyed()) win.close();
+  });
+
   ipcMain.handle(IPC.appInfo, () => {
     const runtime = requireDesktopStateStore().snapshot().runtime;
     return {

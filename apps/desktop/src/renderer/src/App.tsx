@@ -2309,7 +2309,15 @@ export function App() {
                               setRenameValue(current);
                             }}
                           >
-                            ✎
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                              <path
+                                d="M16.7 3.8a2.3 2.3 0 0 1 3.5 3L8.5 18.5l-4.6 1.3 1.3-4.6L16.7 3.8z"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
                           </button>
                         )}
                         <button
@@ -2318,7 +2326,21 @@ export function App() {
                           title="Export this chat as Markdown"
                           onClick={() => void exportSessionMarkdown(session)}
                         >
-                          ⤓
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <path
+                              d="M12 3.5v10m0 0L7.8 9.3m4.2 4.2l4.2-4.2"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                            <path
+                              d="M5 17.5v1a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                              strokeLinecap="round"
+                            />
+                          </svg>
                         </button>
                       </div>
                     ))}

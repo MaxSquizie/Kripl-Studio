@@ -16,6 +16,7 @@ import { RecentProjectsCard } from "./RecentProjectsCard";
 import kriplCodingLoop from "./assets/kripl-coding.mp4";
 import { Markdown, CopyIconButton } from "./Markdown";
 import { WorkspaceSearchPalette, type WorkspaceSearchMode } from "./WorkspaceSearchPalette";
+import { ToastStack, type ToastItem, type ToastKind } from "./Toasts";
 
 function formatBytes(size: number): string {
   if (size < 1024) return `${size} B`;
@@ -283,6 +284,22 @@ export function App() {
   const nearBottomRef = useRef(true);
   const seenFeedLengthRef = useRef(0);
   const [pendingMessages, setPendingMessages] = useState(0);
+
+  // Transient top-right notifications (file saved, model probe, …).
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const toastIdRef = useRef(0);
+
+  function pushToast(kind: ToastKind, message: string) {
+    const id = ++toastIdRef.current;
+    setToasts((current) => [...current.slice(-3), { id, kind, message }]);
+    window.setTimeout(() => {
+      setToasts((current) => current.filter((item) => item.id !== id));
+    }, 4000);
+  }
+
+  function dismissToast(id: number) {
+    setToasts((current) => current.filter((item) => item.id !== id));
+  }
   // Assistant message ids created during the current run (for tok/s).
   const runAssistantIdsRef = useRef<Set<string>>(new Set());
   // A tool call happened after the last assistant bubble was created: the next
@@ -1110,18 +1127,26 @@ export function App() {
   }
 
   async function saveWorkspaceFile(path: string, content: string) {
-    const file = await window.kripl.writeWorkspaceFile(path, content);
-    const [changes, nextGitStatus] = await Promise.all([
-      window.kripl.getWorkspaceChanges(),
-      window.kripl.getWorkspaceGitStatus()
-    ]);
-    setWorkspaceChanges(changes);
-    setGitStatus(nextGitStatus);
-    setEditorDrafts((current) => ({ ...current, [path]: file.content ?? "" }));
-    const view: WorkspaceDocumentView = { type: "file", file };
-    setWorkspaceTabs((current) => upsertWorkspaceTab(current, view));
-    setWorkspaceView(view);
-    persistWorkspaceUi(view);
+    try {
+      const file = await window.kripl.writeWorkspaceFile(path, content);
+      const [changes, nextGitStatus] = await Promise.all([
+        window.kripl.getWorkspaceChanges(),
+        window.kripl.getWorkspaceGitStatus()
+      ]);
+      setWorkspaceChanges(changes);
+      setGitStatus(nextGitStatus);
+      setEditorDrafts((current) => ({ ...current, [path]: file.content ?? "" }));
+      const view: WorkspaceDocumentView = { type: "file", file };
+      setWorkspaceTabs((current) => upsertWorkspaceTab(current, view));
+      setWorkspaceView(view);
+      persistWorkspaceUi(view);
+      pushToast("success", `Saved ${basename(path)}`);
+    } catch (error) {
+      pushToast(
+        "error",
+        error instanceof Error ? error.message : "Failed to save file"
+      );
+    }
   }
 
   async function refreshDiffAfterAction(path: string) {
@@ -1189,11 +1214,18 @@ export function App() {
     if (!result.ok) {
       setProbe({ status: "error", models: [], message: result.error ?? "Local model probe failed." });
       setSelectedModel("");
+      pushToast("error", result.error ?? "Local model server unreachable");
       return;
     }
 
     setEndpoint(result.endpoint);
     setProbe({ status: "ready", models: result.models });
+    pushToast(
+      "success",
+      result.models.length > 0
+        ? `${result.models.length} local model(s) found`
+        : "Local server reachable, no loaded models"
+    );
     setSelectedModel((current) => {
       if (result.models.some((model) => model.id === current)) return current;
       return result.models[0]?.id ?? "";
@@ -1287,9 +1319,10 @@ export function App() {
     setRenamingPath(null);
     const result = await window.kripl.renameAgentSession(path, name);
     if (!result.ok) {
-      setAgentError(result.error ?? "Failed to rename session.");
+      pushToast("error", result.error ?? "Failed to rename session.");
       return;
     }
+    pushToast("success", `Renamed to “${name}”`);
     void refreshSessions();
   }
 
@@ -2231,6 +2264,8 @@ export function App() {
           </section>
         </div>
       )}
+
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
 
       <TerminalPanel
         visible={terminalVisible}

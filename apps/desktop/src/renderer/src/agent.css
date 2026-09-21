@@ -714,6 +714,38 @@ details[open] .chevrons .chevron-up {
   line-height: 0;
 }
 
+/* Non-image attachments shown as compact chips. */
+.message-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.file-chip svg {
+  flex-shrink: 0;
+  color: var(--kripl-accent-bright);
+}
+
+.file-chip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .message-images img {
   max-width: 480px;
   max-height: 360px;

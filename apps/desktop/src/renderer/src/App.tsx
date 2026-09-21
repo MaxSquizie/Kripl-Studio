@@ -151,6 +151,40 @@ function buildMessageWithAttachments(text: string, files: AttachedFile[]): strin
   return text ? `${block}\n\n${text}` : block;
 }
 
+interface ParsedAttachment {
+  name: string;
+  kind: string;
+  path: string;
+}
+
+/**
+ * Inverse of buildMessageWithAttachments for hydrated sessions: pull the
+ * attachment list out of a stored user message, drop the text transcriptions
+ * (they are model-facing noise in the UI) and keep only what the user typed.
+ */
+function parseAttachedFilesBlock(
+  text: string
+): { displayText: string; files: ParsedAttachment[] } | null {
+  if (!text.startsWith("[Attached files]")) return null;
+  const lines = text.split("\n");
+  let index = 1;
+  const files: ParsedAttachment[] = [];
+  for (; index < lines.length; index += 1) {
+    const match = /^\s*-\s+(.+?)\s+\(([^,)]+),\s*(\w+)\)\s+—\s+(.+)$/.exec(
+      lines[index] ?? ""
+    );
+    if (!match || !match[1] || !match[3] || !match[4]) break;
+    files.push({ name: match[1], kind: match[3], path: match[4] });
+  }
+  if (files.length === 0) return null;
+
+  // Drop the "Content of …" transcription sections, keep the user's text.
+  let rest = lines.slice(index).join("\n");
+  rest = rest.replace(/Content of [^\n]*:\n```[\s\S]*?\n```/g, "");
+  const displayText = rest.replace(/^\s+/, "").trim();
+  return { displayText, files };
+}
+
 interface AppInfo {
   name: string;
   version: string;
@@ -189,6 +223,10 @@ interface MessageItem {
   text: string;
   /** Data URLs of attached images, rendered inline in the chat. */
   images?: string[];
+  /** Stored paths awaiting preview load when hydrating an old session. */
+  imagePaths?: string[];
+  /** Non-image attachments (name + stored path), shown as chips. */
+  files?: { name: string; path: string }[];
   reasoning?: ReasoningBlock;
   /** Generation speed restored from storage after an app restart. */
   tokps?: number;
@@ -1054,17 +1092,40 @@ export function App() {
   function hydrateSessionSnapshot(snapshot: AgentSessionSnapshot) {
     const restored: FeedItem[] = snapshot.messages
       .filter((message) => message.role !== "tool")
-      .map((message) => ({
-        kind: "message" as const,
-        id: crypto.randomUUID(),
-        role:
-          message.role === "user"
-            ? "user"
-            : message.role === "assistant"
-              ? "assistant"
-              : "system",
-        text: message.text
-      }));
+      .map((message) => {
+        if (message.role === "user") {
+          // Stored prompts carry the attachment block; restore chips and
+          // hide the model-facing transcriptions.
+          const parsed = parseAttachedFilesBlock(message.text);
+          if (parsed) {
+            const imagePaths = parsed.files
+              .filter((file) => file.kind === "image")
+              .map((file) => file.path);
+            const files = parsed.files
+              .filter((file) => file.kind !== "image")
+              .map((file) => ({ name: file.name, path: file.path }));
+            return {
+              kind: "message" as const,
+              id: crypto.randomUUID(),
+              role: "user" as const,
+              text: parsed.displayText,
+              ...(imagePaths.length > 0 ? { imagePaths } : {}),
+              ...(files.length > 0 ? { files } : {})
+            };
+          }
+        }
+        return {
+          kind: "message" as const,
+          id: crypto.randomUUID(),
+          role:
+            message.role === "user"
+              ? ("user" as const)
+              : message.role === "assistant"
+                ? ("assistant" as const)
+                : ("system" as const),
+          text: message.text
+        };
+      });
 
     // Restore the last known generation speed onto the final answer bubble.
     const storedTokps = Number(readStored("kripl.tokps.last", ""));
@@ -1081,6 +1142,31 @@ export function App() {
     setFeed(restored);
     setLiveSteps(null);
     assistantMessageId.current = null;
+
+    // Re-fetch stored image previews (best-effort; files may be gone).
+    const pending = restored.filter(
+      (item): item is MessageItem =>
+        item.kind === "message" && Boolean(item.imagePaths?.length)
+    );
+    if (pending.length > 0) {
+      for (const item of pending) {
+        for (const path of item.imagePaths ?? []) {
+          void window.kripl.readAttachPreview(path).then((result) => {
+            if (!result.ok || !result.dataUrl) return;
+            const dataUrl = result.dataUrl;
+            setFeed((current) =>
+              current.map((entry): FeedItem => {
+                if (entry.kind !== "message" || entry.id !== item.id) return entry;
+                const next: MessageItem = { ...entry };
+                delete next.imagePaths;
+                next.images = [...(entry.images ?? []), dataUrl];
+                return next;
+              })
+            );
+          });
+        }
+      }
+    }
   }
 
   async function syncActiveSessionFromRuntime() {
@@ -1930,6 +2016,9 @@ export function App() {
     const imageFiles = attachments.filter(
       (file) => !file.error && file.kind === "image" && attachmentPreviews[file.path]
     );
+    const otherFiles = attachments
+      .filter((file) => !file.error && file.kind !== "image")
+      .map((file) => ({ name: file.name, path: file.path }));
     // The chat shows only what the user typed; attachment metadata is
     // still sent to the model in `finalText`.
     const userMessage: MessageItem = {
@@ -1939,7 +2028,8 @@ export function App() {
       text: text,
       ...(imageFiles.length > 0
         ? { images: imageFiles.map((file) => attachmentPreviews[file.path] as string) }
-        : {})
+        : {}),
+      ...(otherFiles.length > 0 ? { files: otherFiles } : {})
     };
 
     setFeed((current) => [...current, userMessage]);
@@ -1978,7 +2068,12 @@ export function App() {
         break;
       }
     }
-    if (!userMessage || (userMessage.images && userMessage.images.length > 0)) return;
+    if (
+      !userMessage ||
+      (userMessage.images && userMessage.images.length > 0) ||
+      (userMessage.files && userMessage.files.length > 0)
+    )
+      return;
 
     discardTurnActivity();
     setFeed((current) => current.slice(0, index)); // keep the prompt, drop the answer
@@ -2256,7 +2351,7 @@ export function App() {
                             {item.text.trim() !== "" && (
                               <CopyIconButton text={item.text} title="Скопировать ответ" />
                             )}
-                            {canSend && item.id === lastAssistantId && !item.images?.length ? (
+                            {canSend && item.id === lastAssistantId && !item.images?.length && !item.files?.length ? (
                               <button
                                 type="button"
                                 className="regenerate-button"
@@ -2350,6 +2445,35 @@ export function App() {
                           ))}
                         </div>
                       )}
+                      {item.files && item.files.length > 0 && (
+                        <div className="message-files">
+                          {item.files.map((file, index) => (
+                            <span key={index} className="file-chip" title={file.path}>
+                              <svg
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                aria-hidden="true"
+                              >
+                                <path
+                                  d="M6 3h8l4 4v14H6V3z"
+                                  stroke="currentColor"
+                                  strokeWidth="1.8"
+                                  strokeLinejoin="round"
+                                />
+                                <path
+                                  d="M14 3v4h4"
+                                  stroke="currentColor"
+                                  strokeWidth="1.8"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                              {file.name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       {editingMessageId === item.id ? (
                         <div className="message-edit">
                           <textarea
@@ -2396,7 +2520,8 @@ export function App() {
                           </div>
                         </div>
                       ) : (
-                        (item.text || !(item.images && item.images.length > 0)) && (
+                        (item.text ||
+                          (!item.images?.length && !item.files?.length)) && (
                           <div className="message-text">
                             {item.text ? <Markdown text={item.text} /> : "…"}
                           </div>

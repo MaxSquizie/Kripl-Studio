@@ -174,12 +174,17 @@ function TokenRing({ used, limit }: { used: number; limit?: number | undefined }
               ? " unknown"
               : fraction >= 1
                 ? " full"
-                : "")
+                : fraction >= 0.8
+                  ? " warn"
+                  : "")
           }
           strokeDasharray={`${circumference * fraction} ${circumference}`}
           transform="rotate(-90 20 20)"
         />
       </svg>
+      {limit !== undefined && (
+        <span className="token-ring-label">{Math.round(fraction * 100)}%</span>
+      )}
       <div className="token-ring-tooltip" role="tooltip">
         <span>{formatTokens(used)} used</span>
         {limit === undefined ? (
@@ -190,6 +195,13 @@ function TokenRing({ used, limit }: { used: number; limit?: number | undefined }
       </div>
     </div>
   );
+}
+
+/** Compact run stopwatch next to the stop button: “45s”, “3m 12s”. */
+function formatRunElapsed(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
 }
 
 /** Stopwatch for the collapsed reasoning block: “3м 12с” or just “45с”. */
@@ -255,6 +267,9 @@ export function App() {
   const [interaction, setInteraction] = useState<AgentInteractionRequest | null>(null);
   // Tokens-per-second for the current turn (shown next to KRIPL).
   const turnStartRef = useRef<number | null>(null);
+  // Wall-clock start of the current run (for the composer stopwatch).
+  const runStartedAtRef = useRef<number | null>(null);
+  const [runElapsed, setRunElapsed] = useState(0);
   const [tokensPerSecond, setTokensPerSecond] = useState<number | undefined>(undefined);
   // Full-size overlay for inspecting attached images.
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
@@ -404,6 +419,18 @@ export function App() {
     return () => window.removeEventListener("keydown", onShortcut);
   }, [workspace]);
 
+  // Tick the composer stopwatch once a second while the run is live.
+  useEffect(() => {
+    if (agentStatus !== "running" && agentStatus !== "stopping") return;
+    const startedAt = runStartedAtRef.current;
+    if (startedAt === null) return;
+    const tick = (): void =>
+      setRunElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [agentStatus]);
+
   // Stick to the bottom while the user is near it; otherwise count new
   // messages for the jump-to-bottom button.
   useEffect(() => {
@@ -422,6 +449,13 @@ export function App() {
     return window.kripl.onAgentEvent((event: AgentEvent) => {
       if (event.type === "agent.status") {
         setAgentStatus(event.status);
+        if (event.status === "running" && runStartedAtRef.current === null) {
+          runStartedAtRef.current = Date.now();
+          setRunElapsed(0);
+        }
+        if (event.status !== "running" && event.status !== "stopping") {
+          runStartedAtRef.current = null;
+        }
         if (event.status === "stopped" || event.status === "error") {
           setInteraction(null);
           settleTurnActivity();
@@ -1953,7 +1987,11 @@ export function App() {
               <TokenRing used={tokenUsageUsed} limit={contextWindowLimit} />
               <span className="composer-bottom-spacer" />
               {agentStatus === "running" || agentStatus === "stopping" ? (
-                <button
+                <>
+                  <span className="run-timer" title="Run time">
+                    {formatRunElapsed(runElapsed)}
+                  </span>
+                  <button
                   type="button"
                   className="send-button stop"
                   title="Stop the agent"
@@ -1963,6 +2001,7 @@ export function App() {
                     <rect x="6.5" y="6.5" width="11" height="11" rx="2" fill="currentColor" />
                   </svg>
                 </button>
+                </>
               ) : (
                 <button
                   type="button"

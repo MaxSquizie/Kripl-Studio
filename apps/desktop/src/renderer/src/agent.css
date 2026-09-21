@@ -807,13 +807,37 @@ summary {
   transition: stroke-dasharray 0.3s ease, stroke 0.3s ease;
 }
 
-.token-ring-arc.full {
+/* Context pressure: warn at 80%, red once the window is exhausted. */
+.token-ring-arc.warn {
   stroke: var(--warning);
+}
+
+.token-ring-arc.full {
+  stroke: var(--error-bright);
 }
 
 /* Server did not report a context limit — neutral arc, no fake numbers. */
 .token-ring-arc.unknown {
   stroke: var(--text-faint);
+}
+
+.token-ring-label {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  font-size: 9px;
+  pointer-events: none;
+}
+
+/* Stopwatch next to the stop button while a run is live. */
+.run-timer {
+  min-width: 46px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .token-ring-tooltip {

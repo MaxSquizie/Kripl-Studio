@@ -1,6 +1,6 @@
 import type { AgentEvent, AttachedFile, AgentInteractionRequest, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, ContextInspectorSnapshot, DesktopRuntimeSettings, DesktopUiState, RecentProject, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceEntry, WorkspaceFilePreview, WorkspaceGitStatus } from "@kripl/core";
 import { cleanAssistantToolText } from "@kripl/core";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import { WorkspaceContent, activeWorkspacePath, type WorkspaceDocumentView, type WorkspaceEditorRevealTarget, type WorkspaceView } from "./WorkspaceContent";
@@ -300,6 +300,8 @@ export function App() {
   const nearBottomRef = useRef(true);
   const seenFeedLengthRef = useRef(0);
   const [pendingMessages, setPendingMessages] = useState(0);
+  // True while the user is scrolled away from the bottom (shows the pill).
+  const [awayFromBottom, setAwayFromBottom] = useState(false);
 
   // Transient top-right notifications (file saved, model probe, …).
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -449,8 +451,10 @@ export function App() {
   }, [agentStatus]);
 
   // Stick to the bottom while the user is near it; otherwise count new
-  // messages for the jump-to-bottom button.
-  useEffect(() => {
+  // messages for the jump-to-bottom button. useLayoutEffect so the scroll
+  // happens before paint — a plain useEffect lets the grown content flash
+  // at the old scroll position first (the view "flies up" mid-stream).
+  useLayoutEffect(() => {
     const el = conversationRef.current;
     if (!el) return;
     if (nearBottomRef.current) {
@@ -461,6 +465,30 @@ export function App() {
       setPendingMessages(feed.length - seenFeedLengthRef.current);
     }
   }, [feed]);
+
+  // Content can grow after paint too (markdown reflow, images loading).
+  // Keep the view pinned while the user is at the bottom.
+  useEffect(() => {
+    const el = conversationRef.current;
+    if (!el) return;
+    const observer = new MutationObserver(() => {
+      if (nearBottomRef.current) el.scrollTop = el.scrollHeight;
+    });
+    observer.observe(el, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
+  }, [workspace, workspaceView]);
+
+  // Switching back to the agent tab remounts the scroll container at the top;
+  // restore the pinned position if the user was at the bottom before.
+  useEffect(() => {
+    if (!workspace || workspaceView.type !== "agent") return;
+    const el = conversationRef.current;
+    if (!el) return;
+    if (nearBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+      setAwayFromBottom(false);
+    }
+  }, [workspace, workspaceView]);
 
   useEffect(() => {
     return window.kripl.onAgentEvent((event: AgentEvent) => {
@@ -1610,6 +1638,7 @@ export function App() {
 
     // A fresh prompt always pulls the view back to the bottom.
     nearBottomRef.current = true;
+    setAwayFromBottom(false);
 
     const result = await window.kripl.sendAgentMessage(finalText);
     if (!result.ok) {
@@ -1643,6 +1672,7 @@ export function App() {
     setFeed((current) => current.slice(0, index)); // keep the prompt, drop the answer
     assistantMessageId.current = null;
     nearBottomRef.current = true;
+    setAwayFromBottom(false);
 
     const directive = `${userMessage.text}\n\n[Regenerate] Your previous answer to this message was discarded by the user. Produce a fresh answer.`;
     const result = await window.kripl.sendAgentMessage(directive);
@@ -1798,6 +1828,7 @@ export function App() {
               const nearBottom =
                 el.scrollTop + el.clientHeight >= el.scrollHeight - 60;
               nearBottomRef.current = nearBottom;
+              setAwayFromBottom(!nearBottom);
               if (nearBottom) {
                 seenFeedLengthRef.current = feed.length;
                 setPendingMessages(0);
@@ -1967,17 +1998,21 @@ export function App() {
             {/* Sticky anchor: pins the pill to the visible bottom while the
                 user is scrolled up, sits at content end otherwise. */}
             <div className="jump-anchor">
-              {pendingMessages > 0 && (
+              {(pendingMessages > 0 || awayFromBottom) && (
                 <button
                   type="button"
                   className="jump-to-bottom"
                   title="К последним сообщениям"
                   onClick={() => {
                     const el = conversationRef.current;
-                    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+                    if (!el) return;
+                    nearBottomRef.current = true;
+                    setAwayFromBottom(false);
+                    setPendingMessages(0);
+                    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
                   }}
                 >
-                  ↓ {pendingMessages}
+                  ↓{pendingMessages > 0 ? ` ${pendingMessages}` : ""}
                 </button>
               )}
             </div>

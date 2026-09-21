@@ -332,6 +332,9 @@ button {
 
 /* Floating pill that appears while the user is scrolled up. */
 .jump-to-bottom {
+  /* The anchor is a zero-height sticky line near the scrollport bottom; grow
+     the pill upward from it or the overflow:auto container clips it. */
+  transform: translateY(calc(-100% - 6px));
   display: inline-flex;
   align-items: center;
   gap: 4px;

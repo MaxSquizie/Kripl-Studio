@@ -1032,12 +1032,15 @@ button {
   inset: -1px;
   pointer-events: none;
   padding: 1.5px;
+  /* Comet: transparent tail fades in to a bright head, then cuts off —
+     the rest of the perimeter stays clear so the motion is visible. */
   background:
     conic-gradient(
-      from calc(var(--snake-angle) - 80deg),
+      from calc(var(--snake-angle) - 100deg),
       transparent 0deg,
-      color-mix(in srgb, var(--kripl-accent-bright) 35%, transparent) 45deg,
-      var(--kripl-accent-bright) 80deg
+      color-mix(in srgb, var(--kripl-accent-bright) 30%, transparent) 45deg,
+      var(--kripl-accent-bright) 92deg,
+      transparent 100deg
     );
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
@@ -1053,10 +1056,11 @@ button {
 .session-row.live::after {
   background:
     conic-gradient(
-      from calc(var(--snake-angle) + 180deg - 80deg),
+      from calc(var(--snake-angle) + 180deg - 100deg),
       transparent 0deg,
-      color-mix(in srgb, var(--kripl-accent-bright) 35%, transparent) 45deg,
-      var(--kripl-accent-bright) 80deg
+      color-mix(in srgb, var(--kripl-accent-bright) 30%, transparent) 45deg,
+      var(--kripl-accent-bright) 92deg,
+      transparent 100deg
     );
 }
 

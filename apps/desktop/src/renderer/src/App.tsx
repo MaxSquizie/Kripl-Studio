@@ -43,13 +43,55 @@ function formatTokens(count: number): string {
 
 // Last known context usage (input + cache-read tokens), restored on start
 // so the ring does not flash 0% before the first live usage event arrives.
-function loadPersistedUsage():
+// Last known context usage per chat. Keyed by session path; brand-new
+// chats that have no file yet share the "__current__" slot.
+const CHAT_USAGE_KEY = "kripl.contextUsed.byChat";
+const NEW_CHAT_USAGE_SLOT = "__current__";
+
+function loadChatUsageMap(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(CHAT_USAGE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as Record<string, number>;
+  } catch {
+    return {};
+  }
+}
+
+function loadChatUsage(key: string):
   | { input?: number; output?: number; cacheRead?: number }
   | null {
-  const raw = readStored("kripl.contextUsed.last", "");
-  if (!raw) return null;
-  const value = Number(raw);
+  let value = Number(loadChatUsageMap()[key]);
+  if ((!Number.isFinite(value) || value <= 0) && key === NEW_CHAT_USAGE_SLOT) {
+    // One-time fallback to the old global slot.
+    const legacy = Number(readStored("kripl.contextUsed.last", ""));
+    if (Number.isFinite(legacy) && legacy > 0) value = legacy;
+  }
   return Number.isFinite(value) && value > 0 ? { input: value } : null;
+}
+
+function rememberChatUsage(key: string, total: number): void {
+  try {
+    const map = loadChatUsageMap();
+    map[key] = total;
+    localStorage.setItem(CHAT_USAGE_KEY, JSON.stringify(map));
+  } catch {
+    // Best-effort.
+  }
+}
+
+function migrateNewChatUsage(targetPath: string): void {
+  try {
+    const map = loadChatUsageMap();
+    const value = map[NEW_CHAT_USAGE_SLOT];
+    if (value !== undefined) {
+      delete map[NEW_CHAT_USAGE_SLOT];
+      map[targetPath] = value;
+      localStorage.setItem(CHAT_USAGE_KEY, JSON.stringify(map));
+    }
+  } catch {
+    // Best-effort.
+  }
 }
 
 function readStored(key: string, fallback: string): string {
@@ -286,8 +328,11 @@ export function App() {
   const [binding, setBinding] = useState<AgentBinding | null>(null);
   // Mirrored for the one-shot agent event subscription (background filter).
   const bindingAgentIdRef = useRef<number | null>(null);
+  // Storage key for this chat's persisted context usage.
+  const chatUsageKeyRef = useRef<string>(NEW_CHAT_USAGE_SLOT);
   useEffect(() => {
     bindingAgentIdRef.current = binding?.agentId ?? null;
+    chatUsageKeyRef.current = binding?.sessionPath || NEW_CHAT_USAGE_SLOT;
   }, [binding]);
   const [composerText, setComposerText] = useState("");
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
@@ -301,7 +346,9 @@ export function App() {
   const [pdfPreviewPath, setPdfPreviewPath] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [usage, setUsage] =
-    useState<{ input?: number; output?: number; cacheRead?: number } | null>(loadPersistedUsage);
+    useState<
+      { input?: number; output?: number; cacheRead?: number } | null
+    >(() => loadChatUsage(NEW_CHAT_USAGE_SLOT));
   const [sessions, setSessions] = useState<AgentSessionSummary[]>([]);
   // Chats whose agent is still running (possibly in the background).
   const [liveSessionPaths, setLiveSessionPaths] = useState<Set<string>>(new Set());
@@ -737,7 +784,7 @@ export function App() {
         if (event.cacheRead !== undefined) next.cacheRead = event.cacheRead;
         setUsage(next);
         const usedTotal = (next.input ?? 0) + (next.cacheRead ?? 0);
-        if (usedTotal > 0) writeStored("kripl.contextUsed.last", String(usedTotal));
+        if (usedTotal > 0) rememberChatUsage(chatUsageKeyRef.current, usedTotal);
         const start = turnStartRef.current;
         if (next.output && next.output > 0 && start) {
           const seconds = Math.max(1, (Date.now() - start) / 1000);
@@ -1029,6 +1076,9 @@ export function App() {
           : undefined;
 
       if (persistedPath) {
+        // A brand-new chat just got its file — move the usage value from the
+        // shared slot to the real path so it survives restarts per-chat.
+        const hadNoPath = !binding?.sessionPath;
         setBinding((current) =>
           current
             ? {
@@ -1037,6 +1087,7 @@ export function App() {
               }
             : current
         );
+        if (hadNoPath) migrateNewChatUsage(persistedPath);
       }
     } catch {
       // Session metadata refresh must not interrupt the live agent UI.
@@ -1491,7 +1542,8 @@ export function App() {
     setFeed([]);
     setLiveSteps(null);
     // Keep the last known context usage visible until live events replace it.
-    setUsage(loadPersistedUsage());
+    // Restore this chat's last known context usage until live events arrive.
+    setUsage(loadChatUsage(resumeSessionPath ?? NEW_CHAT_USAGE_SLOT));
     assistantMessageId.current = null;
 
     const result = await window.kripl.startAgent({
@@ -1542,6 +1594,7 @@ export function App() {
 
       const snapshot = await window.kripl.getAgentSessionSnapshot().catch(() => null);
       if (snapshot) hydrateSessionSnapshot(snapshot);
+      setUsage(loadChatUsage(sessionPath));
 
       const nextBinding: AgentBinding = {
         workspacePath: workspace.path,

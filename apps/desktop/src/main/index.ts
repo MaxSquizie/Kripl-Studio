@@ -57,6 +57,8 @@ const IPC = {
   agentStart: "kripl:agent-start",
   agentAttach: "kripl:agent-attach",
   agentDeleteSession: "kripl:agent-delete-session",
+  agentLiveSessions: "kripl:agent-live-sessions",
+  agentLiveChanged: "kripl:agent-live-changed",
   agentSessionSnapshot: "kripl:agent-session-snapshot",
   agentExportSession: "kripl:agent-export-session",
   agentSearchSessions: "kripl:agent-search-sessions",
@@ -223,6 +225,33 @@ async function validatedSessionPath(
     throw new Error("Selected Pi session does not belong to the active workspace.");
   }
   return matched.path;
+}
+
+/** Which agents are alive right now (active + parked in the background). */
+async function listLiveAgents(): Promise<Array<{ sessionPath?: string; running: boolean }>> {
+  const entries: Array<{ agent: PiAgentRuntime; status: AgentStatus }> = [];
+  if (activeAgent) entries.push({ agent: activeAgent, status: activeAgentStatus });
+  for (const slot of backgroundAgents.values()) {
+    entries.push({ agent: slot.agent, status: slot.status });
+  }
+
+  const live: Array<{ sessionPath?: string; running: boolean }> = [];
+  for (const entry of entries) {
+    const running = entry.status === "running" || entry.status === "stopping";
+    if (!running) continue;
+    const file = await liveSessionFile(entry.agent);
+    live.push({
+      ...(file ? { sessionPath: file } : {}),
+      running
+    });
+  }
+  return live;
+}
+
+function broadcastLiveAgents(): void {
+  void listLiveAgents()
+    .then((live) => broadcastToWindow(IPC.agentLiveChanged, live))
+    .catch(() => {});
 }
 
 function broadcastToWindow(channel: string, payload: unknown): void {
@@ -558,6 +587,7 @@ async function disposeActiveAgent(): Promise<void> {
     agentIds.delete(agent);
     await agent.dispose();
   }
+  broadcastLiveAgents();
 }
 
 function disposeBackgroundAgent(id: number): void {
@@ -567,6 +597,7 @@ function disposeBackgroundAgent(id: number): void {
   slot.unsubscribe();
   agentIds.delete(slot.agent);
   void slot.agent.dispose().catch(() => {});
+  broadcastLiveAgents();
 }
 
 function disposeAllAgents(): Promise<void> {
@@ -582,10 +613,12 @@ function forwardAgentEvent(
   void contextRuntime.record(event);
 
   if (event.type === "agent.status") {
+    const previous = activeAgentStatus;
     activeAgentStatus = event.status;
     if (event.status === "ready") {
       void rememberActiveAgentSession();
     }
+    if (previous !== event.status) broadcastLiveAgents();
   }
 
   if (event.type === "agent.raw" || !target || target.isDestroyed()) return;
@@ -612,11 +645,13 @@ function parkActiveAgentInBackground(): void {
   };
   slot.unsubscribe = agent.subscribe((event) => {
     if (event.type === "agent.status") {
+      const previous = slot.status;
       slot.status = event.status;
       if (event.status === "ready" || event.status === "stopped") {
         void rememberBackgroundSession(slot);
         broadcastToWindow(IPC.agentSessionsChanged, undefined);
       }
+      if (previous !== event.status) broadcastLiveAgents();
     }
     forwardAgentEvent(eventSender(), event, id);
   });
@@ -661,6 +696,7 @@ function promoteBackgroundAgent(id: number): boolean {
       void autoNameActiveSession();
     }
   });
+  broadcastLiveAgents();
   return true;
 }
 
@@ -1338,6 +1374,16 @@ function registerIpc(): void {
       return { ok: false, error: "No running agent for this chat." };
     }
   );
+
+  ipcMain.handle(IPC.agentLiveSessions, async (): Promise<
+    Array<{ sessionPath?: string; running: boolean }>
+  > => {
+    try {
+      return await listLiveAgents();
+    } catch {
+      return [];
+    }
+  });
 
   // Delete a saved chat file (and its name entry), stopping any live runtime.
   ipcMain.handle(IPC.agentDeleteSession, async (_event, sessionPath: unknown): Promise<ActionResult> => {

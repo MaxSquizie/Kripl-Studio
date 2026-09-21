@@ -282,6 +282,8 @@ export function App() {
   const [usage, setUsage] =
     useState<{ input?: number; output?: number; cacheRead?: number } | null>(loadPersistedUsage);
   const [sessions, setSessions] = useState<AgentSessionSummary[]>([]);
+  // Chats whose agent is still running (possibly in the background).
+  const [liveSessionPaths, setLiveSessionPaths] = useState<Set<string>>(new Set());
   // Full-text search across saved chats.
   const [sessionQuery, setSessionQuery] = useState("");
   const [sessionHits, setSessionHits] = useState<AgentSessionSearchHit[]>([]);
@@ -395,6 +397,18 @@ export function App() {
     const unsubscribeSessionsChanged = window.kripl.onAgentSessionsChanged(() => {
       if (!disposed) void refreshSessions();
     });
+
+    const applyLiveAgents = (live: Array<{ sessionPath?: string; running: boolean }>): void => {
+      setLiveSessionPaths(
+        new Set(live.map((item) => item.sessionPath).filter((path): path is string => Boolean(path)))
+      );
+    };
+    const unsubscribeLive = window.kripl.onAgentLiveChanged((live) => {
+      if (!disposed) applyLiveAgents(live);
+    });
+    void window.kripl.listLiveAgents().then((live) => {
+      if (!disposed) applyLiveAgents(live);
+    });
     const unsubscribeWindowMaximized = window.kripl.onWindowMaximized((maximized) => {
       if (!disposed) setWindowMaximized(maximized);
     });
@@ -403,6 +417,7 @@ export function App() {
       disposed = true;
       unsubscribeContext();
       unsubscribeSessionsChanged();
+      unsubscribeLive();
       unsubscribeWindowMaximized();
     };
   }, []);
@@ -2655,7 +2670,9 @@ export function App() {
                       <div
                         key={session.path}
                         className={
-                          "session-row" + (binding?.sessionPath === session.path ? " active" : "")
+                          "session-row" +
+                          (binding?.sessionPath === session.path ? " active" : "") +
+                          (liveSessionPaths.has(session.path) ? " live" : "")
                         }
                         onContextMenu={(event) => openSessionMenu(event, session)}
                       >

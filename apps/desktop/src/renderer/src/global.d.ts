@@ -77,6 +77,10 @@ declare global {
         ActionResult & { agentId?: number; status?: AgentStatus }
       >;
       deleteAgentSession(sessionPath: string): Promise<ActionResult>;
+      listLiveAgents(): Promise<Array<{ sessionPath?: string; running: boolean }>>;
+      onAgentLiveChanged(
+        listener: (live: Array<{ sessionPath?: string; running: boolean }>) => void
+      ): () => void;
       getAgentSessionSnapshot(): Promise<AgentSessionSnapshot | null>;
       exportAgentSession(sessionPath: string): Promise<AgentSessionSnapshot | null>;
       searchAgentSessions(query: string): Promise<AgentSessionSearchHit[]>;

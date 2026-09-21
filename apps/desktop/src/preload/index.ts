@@ -35,6 +35,8 @@ const IPC = {
   agentStart: "kripl:agent-start",
   agentAttach: "kripl:agent-attach",
   agentDeleteSession: "kripl:agent-delete-session",
+  agentLiveSessions: "kripl:agent-live-sessions",
+  agentLiveChanged: "kripl:agent-live-changed",
   agentSessionSnapshot: "kripl:agent-session-snapshot",
   agentExportSession: "kripl:agent-export-session",
   agentSearchSessions: "kripl:agent-search-sessions",
@@ -203,6 +205,20 @@ const api = {
 
   deleteAgentSession: (sessionPath: string) =>
     ipcRenderer.invoke(IPC.agentDeleteSession, sessionPath) as Promise<ActionResult>,
+
+  listLiveAgents: () =>
+    ipcRenderer.invoke(
+      IPC.agentLiveSessions
+    ) as Promise<Array<{ sessionPath?: string; running: boolean }>>,
+
+  onAgentLiveChanged: (listener: (live: Array<{ sessionPath?: string; running: boolean }>) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, live: unknown): void =>
+      listener(live as Array<{ sessionPath?: string; running: boolean }>);
+    ipcRenderer.on(IPC.agentLiveChanged, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC.agentLiveChanged, handler);
+    };
+  },
 
   getAgentSessionSnapshot: () =>
     ipcRenderer.invoke(IPC.agentSessionSnapshot) as Promise<AgentSessionSnapshot | null>,

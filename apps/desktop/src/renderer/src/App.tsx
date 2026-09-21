@@ -1420,6 +1420,44 @@ export function App() {
     if (directPaths.length > 0) void addAttachments(directPaths);
   }
 
+  // Download a saved chat as a Markdown file.
+  async function exportSessionMarkdown(session: AgentSessionSummary) {
+    const snapshot = await window.kripl.exportAgentSession(session.path);
+    if (!snapshot || snapshot.messages.length === 0) {
+      pushToast("error", "Nothing to export in this chat yet.");
+      return;
+    }
+    const title =
+      session.name && session.name !== basename(session.path)
+        ? session.name
+        : (session.firstMessage?.slice(0, 60) ?? basename(session.path));
+
+    const lines: string[] = [`# ${title}`, ""];
+    for (const message of snapshot.messages) {
+      if (message.role === "user") {
+        lines.push("## User", "", message.text, "");
+      } else if (message.role === "assistant") {
+        lines.push("## Assistant", "", message.text, "");
+      } else {
+        const suffix = [message.toolName ?? "tool", message.isError ? "(error)" : ""]
+          .filter(Boolean)
+          .join(" ");
+        lines.push(`### ${suffix}`, "", message.text, "");
+      }
+    }
+
+    const blob = new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${title.replace(/[\\/:*?"<>|]+/g, "_").slice(0, 64) || "session"}.md`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+    pushToast("success", `Exported “${title}” as Markdown`);
+  }
+
   async function commitSessionRename(path: string) {
     const name = renameValue.trim();
     setRenamingPath(null);
@@ -2228,6 +2266,14 @@ export function App() {
                             ✎
                           </button>
                         )}
+                        <button
+                          type="button"
+                          className="icon-button session-export"
+                          title="Export this chat as Markdown"
+                          onClick={() => void exportSessionMarkdown(session)}
+                        >
+                          ⤓
+                        </button>
                       </div>
                     ))}
                 </div>

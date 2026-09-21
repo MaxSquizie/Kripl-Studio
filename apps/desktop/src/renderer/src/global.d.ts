@@ -74,6 +74,7 @@ declare global {
         sessionPath?: string;
       }): Promise<ActionResult>;
       getAgentSessionSnapshot(): Promise<AgentSessionSnapshot | null>;
+      exportAgentSession(sessionPath: string): Promise<AgentSessionSnapshot | null>;
       sendAgentMessage(message: string): Promise<ActionResult>;
       pickAttachFiles(): Promise<string[]>;
       attachAgentFiles(paths: string[]): Promise<{

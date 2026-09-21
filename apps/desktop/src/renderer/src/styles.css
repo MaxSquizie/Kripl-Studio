@@ -877,7 +877,8 @@ button {
   cursor: default;
 }
 
-.session-rename {
+.session-rename,
+.session-export {
   align-self: center;
 }
 

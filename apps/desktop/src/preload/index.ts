@@ -34,6 +34,7 @@ const IPC = {
   agentSessionsChanged: "kripl:agent-sessions-changed",
   agentStart: "kripl:agent-start",
   agentSessionSnapshot: "kripl:agent-session-snapshot",
+  agentExportSession: "kripl:agent-export-session",
   agentSend: "kripl:agent-send",
   pickAttachFiles: "kripl:pick-attach-files",
   agentAttachFiles: "kripl:agent-attach-files",
@@ -191,6 +192,12 @@ const api = {
 
   getAgentSessionSnapshot: () =>
     ipcRenderer.invoke(IPC.agentSessionSnapshot) as Promise<AgentSessionSnapshot | null>,
+
+  exportAgentSession: (sessionPath: string) =>
+    ipcRenderer.invoke(
+      IPC.agentExportSession,
+      sessionPath
+    ) as Promise<AgentSessionSnapshot | null>,
 
   sendAgentMessage: (message: string) =>
     ipcRenderer.invoke(IPC.agentSend, message) as Promise<ActionResult>,

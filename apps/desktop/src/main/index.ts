@@ -3,12 +3,16 @@ import { JsonDesktopStateStore } from "@kripl/app-state";
 import { InspectableContextRuntime } from "@kripl/context-runtime";
 import { LocalOpenAIProvider } from "@kripl/local-openai-provider";
 import { effectivePermissionPolicy, parsePermissionPolicy } from "@kripl/permissions";
-import { PiAgentRuntime, PiSessionCatalog } from "@kripl/pi-adapter";
+import {
+  normalizePiSessionMessages,
+  PiAgentRuntime,
+  PiSessionCatalog
+} from "@kripl/pi-adapter";
 import { PtyTerminalRuntime } from "@kripl/terminal";
 import { LocalWorkspaceRuntime } from "@kripl/workspace";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserRuntime } from "./browser-runtime.js";
 import { ToolBridgeServer } from "./tool-bridge.js";
@@ -42,6 +46,7 @@ const IPC = {
   agentSessions: "kripl:agent-sessions",
   agentStart: "kripl:agent-start",
   agentSessionSnapshot: "kripl:agent-session-snapshot",
+  agentExportSession: "kripl:agent-export-session",
   agentSend: "kripl:agent-send",
   pickAttachFiles: "kripl:pick-attach-files",
   agentAttachFiles: "kripl:agent-attach-files",
@@ -870,6 +875,51 @@ function registerIpc(): void {
     if (!activeAgent) return null;
     return activeAgent.getSessionSnapshot();
   });
+
+  // Export any session file (JSONL) as normalized messages for Markdown export.
+  ipcMain.handle(
+    IPC.agentExportSession,
+    async (_event, sessionPath: unknown): Promise<AgentSessionSnapshot | null> => {
+      if (
+        typeof sessionPath !== "string" ||
+        !sessionPath.endsWith(".jsonl") ||
+        sessionPath.length > 4096
+      ) {
+        return null;
+      }
+      try {
+        const raw = await readFile(sessionPath, "utf8");
+        const records: unknown[] = [];
+        for (const line of raw.split("\n")) {
+          if (!line.trim()) continue;
+          let entry: unknown;
+          try {
+            entry = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          const record = entry as { type?: unknown; message?: unknown } | null;
+          if (
+            record &&
+            typeof record === "object" &&
+            record.type === "message" &&
+            record.message &&
+            typeof record.message === "object"
+          ) {
+            records.push(record.message);
+          }
+        }
+        const messages = normalizePiSessionMessages(records).slice(0, 500);
+        return {
+          sessionId: basename(sessionPath, ".jsonl"),
+          messageCount: messages.length,
+          messages
+        };
+      } catch {
+        return null;
+      }
+    }
+  );
 
   ipcMain.handle(IPC.probeLocalModels, async (_event, endpoint: unknown) => {
     if (typeof endpoint !== "string" || endpoint.length > 2048) {

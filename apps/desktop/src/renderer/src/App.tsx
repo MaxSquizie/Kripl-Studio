@@ -40,6 +40,17 @@ function formatTokens(count: number): string {
   return String(count);
 }
 
+// Last known context usage (input + cache-read tokens), restored on start
+// so the ring does not flash 0% before the first live usage event arrives.
+function loadPersistedUsage():
+  | { input?: number; output?: number; cacheRead?: number }
+  | null {
+  const raw = readStored("kripl.contextUsed.last", "");
+  if (!raw) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? { input: value } : null;
+}
+
 function readStored(key: string, fallback: string): string {
   try {
     return localStorage.getItem(key) ?? fallback;
@@ -252,7 +263,8 @@ export function App() {
   const [attachmentPreviews, setAttachmentPreviews] = useState<Record<string, string>>({});
   const [pdfPreviewPath, setPdfPreviewPath] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
-  const [usage, setUsage] = useState<{ input?: number; output?: number; cacheRead?: number } | null>(null);
+  const [usage, setUsage] =
+    useState<{ input?: number; output?: number; cacheRead?: number } | null>(loadPersistedUsage);
   const [sessions, setSessions] = useState<AgentSessionSummary[]>([]);
 
   const [windowMaximized, setWindowMaximized] = useState(false);
@@ -633,6 +645,8 @@ export function App() {
         if (event.output !== undefined) next.output = event.output;
         if (event.cacheRead !== undefined) next.cacheRead = event.cacheRead;
         setUsage(next);
+        const usedTotal = (next.input ?? 0) + (next.cacheRead ?? 0);
+        if (usedTotal > 0) writeStored("kripl.contextUsed.last", String(usedTotal));
         const start = turnStartRef.current;
         if (next.output && next.output > 0 && start) {
           const seconds = Math.max(1, (Date.now() - start) / 1000);
@@ -1373,7 +1387,8 @@ export function App() {
     setAgentStatus("starting");
     setFeed([]);
     setLiveSteps(null);
-    setUsage(null);
+    // Keep the last known context usage visible until live events replace it.
+    setUsage(loadPersistedUsage());
     assistantMessageId.current = null;
 
     const result = await window.kripl.startAgent({

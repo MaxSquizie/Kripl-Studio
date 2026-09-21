@@ -1895,6 +1895,76 @@ button {
   box-shadow: 0 30px 100px rgba(0, 0, 0, 0.52);
 }
 
+/* Ctrl+K command palette — same family as the search palette. */
+.command-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  background: rgba(3, 7, 6, 0.58);
+  padding: 14vh 24px 24px;
+  backdrop-filter: blur(4px);
+}
+
+.command-palette {
+  display: grid;
+  width: min(640px, calc(100vw - 48px));
+  max-height: min(560px, 70vh);
+  overflow: hidden;
+  border: 1px solid var(--kripl-accent-dim);
+  border-radius: 13px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--kripl-accent) 12%, transparent), transparent 30%),
+    var(--bg-app);
+  box-shadow: 0 30px 100px rgba(0, 0, 0, 0.52);
+}
+
+.command-palette-input {
+  border: none;
+  border-bottom: 1px solid var(--bg-tinted);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 14px;
+  padding: 13px 16px;
+  outline: none;
+}
+
+.command-palette-list {
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.command-palette-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: left;
+  padding: 9px 12px;
+  cursor: pointer;
+}
+
+.command-palette-row.selected {
+  background: color-mix(in srgb, var(--kripl-accent) 14%, transparent);
+  color: var(--text-primary);
+}
+
+.command-palette-hint {
+  flex: none;
+  color: var(--text-faint);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
 .search-palette-modes {
   display: flex;
   gap: 4px;

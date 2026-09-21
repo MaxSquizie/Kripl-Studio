@@ -16,6 +16,7 @@ import { RecentProjectsCard } from "./RecentProjectsCard";
 import kriplCodingLoop from "./assets/kripl-coding.mp4";
 import { Markdown, CopyIconButton } from "./Markdown";
 import { WorkspaceSearchPalette, type WorkspaceSearchMode } from "./WorkspaceSearchPalette";
+import { CommandPalette, type CommandItem } from "./CommandPalette";
 import { ToastStack, type ToastItem, type ToastKind } from "./Toasts";
 
 function formatBytes(size: number): string {
@@ -315,6 +316,9 @@ export function App() {
   function dismissToast(id: number) {
     setToasts((current) => current.filter((item) => item.id !== id));
   }
+
+  // Ctrl+K command palette.
+  const [paletteOpen, setPaletteOpen] = useState(false);
   // Assistant message ids created during the current run (for tok/s).
   const runAssistantIdsRef = useRef<Set<string>>(new Set());
   // A tool call happened after the last assistant bubble was created: the next
@@ -418,6 +422,19 @@ export function App() {
     window.addEventListener("keydown", onShortcut);
     return () => window.removeEventListener("keydown", onShortcut);
   }, [workspace]);
+
+  // Ctrl+K toggles the command palette (works without a workspace too).
+  useEffect(() => {
+    function onCommandKey(event: KeyboardEvent) {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      if (event.key.toLowerCase() !== "k") return;
+      event.preventDefault();
+      setPaletteOpen((open) => !open);
+    }
+
+    window.addEventListener("keydown", onCommandKey);
+    return () => window.removeEventListener("keydown", onCommandKey);
+  }, []);
 
   // Tick the composer stopwatch once a second while the run is live.
   useEffect(() => {
@@ -701,6 +718,61 @@ export function App() {
     return null;
   }, [feed]);
   const tokenUsageUsed = usage ? (usage.input ?? 0) + (usage.cacheRead ?? 0) : 0;
+
+  // Command palette entries, rebuilt when the relevant state changes.
+  const paletteItems = useMemo<CommandItem[]>(() => {
+    const items: CommandItem[] = [];
+
+    if (agentStatus === "running" || agentStatus === "stopping") {
+      items.push({ id: "stop", label: "Stop agent", hint: "run", run: () => void abortAgent() });
+    } else if (canStartAgent) {
+      items.push({ id: "new-session", label: "New session", hint: "agent", run: () => void startAgent() });
+    }
+
+    items.push(
+      { id: "open-project", label: "Open project…", hint: "workspace", run: () => void openWorkspace() },
+      {
+        id: "terminal",
+        label: terminalVisible ? "Hide terminal" : "Show terminal",
+        hint: "view",
+        run: () => setTerminalVisible((visible) => !visible)
+      },
+      { id: "settings", label: "Open settings", hint: "view", run: () => setSettingsOpen(true) },
+      { id: "probe", label: "Probe local model server", hint: "model", run: () => void probeModels() }
+    );
+
+    if (workspace) {
+      items.push(
+        { id: "search-files", label: "Search files", hint: "Ctrl+P", run: () => setWorkspaceSearchMode("files") },
+        { id: "search-text", label: "Search text", hint: "Ctrl+Shift+F", run: () => setWorkspaceSearchMode("text") },
+        { id: "refresh-sessions", label: "Refresh sessions", hint: "sessions", run: () => void refreshSessions() }
+      );
+    }
+
+    for (const project of recentProjects) {
+      if (project.path === workspace?.path) continue;
+      items.push({
+        id: `switch-${project.path}`,
+        label: `Switch to ${project.name}`,
+        hint: "project",
+        run: () => void openRecentProject(project.path)
+      });
+    }
+
+    const resumable = [...sessions]
+      .sort((a, b) => b.modifiedAt - a.modifiedAt)
+      .slice(0, 8);
+    for (const session of resumable) {
+      items.push({
+        id: `resume-${session.path}`,
+        label: `Resume chat: ${session.name && session.name !== basename(session.path) ? session.name : session.firstMessage ?? basename(session.path)}`,
+        hint: "session",
+        run: () => void startAgent(session.path)
+      });
+    }
+
+    return items;
+  }, [agentStatus, canStartAgent, workspace, terminalVisible, recentProjects, sessions]);
 
   // Auto-reconnect: if this workspace was bound to the same server/model in a
   // previous run, start the agent again without any manual steps.
@@ -1615,6 +1687,10 @@ export function App() {
           onClose={() => setWorkspaceSearchMode(null)}
           onOpenFile={openWorkspaceFile}
         />
+      )}
+
+      {paletteOpen && (
+        <CommandPalette items={paletteItems} onClose={() => setPaletteOpen(false)} />
       )}
 
       <div className="workspace">

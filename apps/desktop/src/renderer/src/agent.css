@@ -120,6 +120,36 @@
   font-weight: 600;
 }
 
+/* Edit & resend mode for user messages. */
+.message-edit {
+  display: grid;
+  gap: 8px;
+}
+
+.message-edit textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  outline: none;
+}
+
+.message-edit textarea:focus {
+  border-color: var(--kripl-accent);
+}
+
+.message-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 /* Collapsible reasoning inside the agent bubble. */
 .reasoning {
   margin-top: -2px;

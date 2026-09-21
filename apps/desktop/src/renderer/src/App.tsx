@@ -257,6 +257,9 @@ export function App() {
   const [binding, setBinding] = useState<AgentBinding | null>(null);
   const [composerText, setComposerText] = useState("");
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
+  // User message being edited for a resend (replaces it and everything after).
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
   const [renameValue, setRenameValue] = useState("");
   const [attachments, setAttachments] = useState<AttachedFile[]>([]);
   // path -> data URL preview (images and PDFs) for the composer chips
@@ -1720,6 +1723,37 @@ export function App() {
   }
 
 
+  /**
+   * Edit & resend: replace the user message with the new text, drop everything
+   * after it, and send. Attachment metadata from the original prompt is not
+   * restored — only the edited text goes out.
+   */
+  async function resubmitEdited(id: string, newText: string): Promise<void> {
+    const trimmed = newText.trim();
+    if (!trimmed || !canSend) return;
+    setEditingMessageId(null);
+    discardTurnActivity();
+
+    setFeed((current) => {
+      const index = current.findIndex((item) => item.kind === "message" && item.id === id);
+      if (index < 0) return current;
+      return [
+        ...current.slice(0, index),
+        { kind: "message", id: crypto.randomUUID(), role: "user", text: trimmed }
+      ];
+    });
+
+    assistantMessageId.current = null;
+    nearBottomRef.current = true;
+    setAwayFromBottom(false);
+
+    const result = await window.kripl.sendAgentMessage(trimmed);
+    if (!result.ok) {
+      setAgentStatus("error");
+      setAgentError(result.error ?? "Prompt was rejected.");
+    }
+  }
+
   async function respondToInteraction(response: AgentInteractionResponse) {
     const result = await window.kripl.respondToAgentInteraction(response);
     if (!result.ok) {
@@ -1936,6 +1970,29 @@ export function App() {
                             ) : null}
                           </span>
                         )}
+                        {item.role === "user" && (
+                          <span className="message-actions">
+                            <button
+                              type="button"
+                              className="regenerate-button"
+                              title="Редактировать и отправить заново (хвост диалога будет заменён)"
+                              onClick={() => {
+                                setEditingMessageId(item.id);
+                                setEditValue(item.text ?? "");
+                              }}
+                            >
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <path
+                                  d="M16.7 3.8a2.3 2.3 0 0 1 3.5 3L8.5 18.5l-4.6 1.3 1.3-4.6L16.7 3.8z"
+                                  stroke="currentColor"
+                                  strokeWidth="1.8"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                            </button>
+                          </span>
+                        )}
                       </div>
                       {item.role === "assistant" && item.reasoning ? (
                         <CollapsibleDetails
@@ -1995,10 +2052,57 @@ export function App() {
                           ))}
                         </div>
                       )}
-                      {(item.text || !(item.images && item.images.length > 0)) && (
-                        <div className="message-text">
-                          {item.text ? <Markdown text={item.text} /> : "…"}
+                      {editingMessageId === item.id ? (
+                        <div className="message-edit">
+                          <textarea
+                            value={editValue}
+                            autoFocus
+                            onChange={(event) => setEditValue(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" && !event.shiftKey) {
+                                event.preventDefault();
+                                void resubmitEdited(item.id, editValue);
+                              } else if (event.key === "Escape") {
+                                setEditingMessageId(null);
+                              }
+                            }}
+                          />
+                          <div className="message-edit-actions">
+                            <button
+                              type="button"
+                              className="icon-button"
+                              title="Отменить правку (Esc)"
+                              onClick={() => setEditingMessageId(null)}
+                            >
+                              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                                <path d="M1.5 1.5l9 9M10.5 1.5l-9 9" stroke="currentColor" strokeWidth="1.2" />
+                              </svg>
+                            </button>
+                            <button
+                              type="button"
+                              className="send-button"
+                              title="Отправить заново (Enter)"
+                              disabled={!editValue.trim() || !canSend}
+                              onClick={() => void resubmitEdited(item.id, editValue)}
+                            >
+                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <path
+                                  d="M12 19V5m0 0L6 11m6-6l6 6"
+                                  stroke="currentColor"
+                                  strokeWidth="2.3"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                            </button>
+                          </div>
                         </div>
+                      ) : (
+                        (item.text || !(item.images && item.images.length > 0)) && (
+                          <div className="message-text">
+                            {item.text ? <Markdown text={item.text} /> : "…"}
+                          </div>
+                        )
                       )}
                     </article>
                   ) : (

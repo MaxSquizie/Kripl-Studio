@@ -26,7 +26,6 @@ export function TrayMenu() {
         </svg>
         Show Kripl Studio
       </button>
-      <div className="tray-menu-divider" />
       <button type="button" className="tray-menu-item danger" onClick={() => run("quit")}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M6.5 6.5l11 11m0-11l-11 11" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />

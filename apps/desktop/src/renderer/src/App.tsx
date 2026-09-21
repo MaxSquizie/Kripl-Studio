@@ -401,6 +401,20 @@ export function App() {
   // Chat scrolling: stick to the bottom while the user is near it, otherwise
   // count new messages and offer a jump-to-bottom button.
   const conversationRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  // Bumped on every workspace hydration; in-flight async flows (resume /
+  // start / hydrate) abort their state writes when a newer switch wins.
+  const switchSeqRef = useRef(0);
+
+  // The input grows with the text up to ~3x its base height, then scrolls.
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const capped = Math.min(el.scrollHeight, 156);
+    el.style.height = `${capped}px`;
+    el.style.overflowY = el.scrollHeight > 156 ? "auto" : "hidden";
+  }, [composerText]);
   const nearBottomRef = useRef(true);
   const seenFeedLengthRef = useRef(0);
   const [pendingMessages, setPendingMessages] = useState(0);
@@ -983,11 +997,14 @@ export function App() {
     if (!workspace || !modelReady) return;
     if (autoStartedWorkspaces.current.has(workspace.path)) return;
     const saved = loadSavedBindings()[workspace.path];
-    if (!saved || saved.endpoint !== endpoint || saved.modelId !== selectedModel) {
+    // A stale server/model selection must not auto-start the wrong runtime.
+    if (saved && (saved.endpoint !== endpoint || saved.modelId !== selectedModel)) {
       return;
     }
     autoStartedWorkspaces.current.add(workspace.path);
-    if (saved.sessionPath) void resumeSession(saved.sessionPath);
+    // Resume this project's last chat, or open a fresh session so the
+    // composer is never left dead after a project switch.
+    if (saved?.sessionPath) void resumeSession(saved.sessionPath);
     else void startAgent();
   }, [workspace, modelReady]);
 
@@ -1114,6 +1131,9 @@ export function App() {
     descriptor: WorkspaceDescriptor,
     ui: DesktopUiState
   ) {
+    const seq = ++switchSeqRef.current;
+    const stale = () => switchSeqRef.current !== seq;
+
     const [rootEntries, changes, nextGitStatus] = await Promise.all([
       window.kripl.listWorkspace(),
       window.kripl.getWorkspaceChanges(),
@@ -1135,6 +1155,7 @@ export function App() {
       } catch {
         // Stale/deleted directories are simply omitted from restored UI state.
       }
+      if (stale()) return;
     }
 
     let nextView: WorkspaceView = { type: "agent" };
@@ -1156,6 +1177,7 @@ export function App() {
       }
     }
 
+    if (stale()) return;
     setWorkspace(descriptor);
     setWorkspaceEntries(entries);
     setExpandedDirectories(expanded);
@@ -1536,6 +1558,7 @@ export function App() {
 
   async function startAgent(resumeSessionPath?: string) {
     if (!workspace || !modelReady || !selectedModel) return;
+    const seq = switchSeqRef.current;
 
     setAgentError("");
     setAgentStatus("starting");
@@ -1551,6 +1574,8 @@ export function App() {
       modelId: selectedModel,
       ...(resumeSessionPath ? { sessionPath: resumeSessionPath } : {})
     });
+    // A newer workspace switch won while we were starting — drop the result.
+    if (switchSeqRef.current !== seq) return;
 
     if (!result.ok) {
       setAgentStatus("error");
@@ -1583,8 +1608,10 @@ export function App() {
    */
   async function resumeSession(sessionPath: string): Promise<void> {
     if (!workspace || !modelReady || !selectedModel) return;
+    const seq = switchSeqRef.current;
 
     const attached = await window.kripl.attachAgent(sessionPath);
+    if (switchSeqRef.current !== seq) return;
     if (attached.ok && typeof attached.agentId === "number") {
       setEditingMessageId(null);
       discardTurnActivity();
@@ -1593,6 +1620,7 @@ export function App() {
       setAwayFromBottom(false);
 
       const snapshot = await window.kripl.getAgentSessionSnapshot().catch(() => null);
+      if (switchSeqRef.current !== seq) return;
       if (snapshot) hydrateSessionSnapshot(snapshot);
       setUsage(loadChatUsage(sessionPath));
 
@@ -2522,8 +2550,8 @@ export function App() {
               </>
             )}
             <textarea
+              ref={composerRef}
               disabled={!canSend}
-              rows={2}
               value={composerText}
               onChange={(event) => setComposerText(event.target.value)}
               onPaste={(event) => void handleComposerPaste(event)}

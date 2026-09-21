@@ -431,6 +431,11 @@ button {
   background: var(--bg-surface);
   padding: 12px;
   color: var(--text-primary);
+  /* Grows with the text up to ~3x, then scrolls internally. */
+  height: 52px;
+  min-height: 52px;
+  max-height: 156px;
+  overflow-y: hidden;
 }
 
 .composer textarea:disabled,
@@ -889,20 +894,20 @@ button {
   display: grid;
   align-content: start;
   gap: 2px;
-  padding: 6px;
+  padding: 5px;
   background: transparent;
 }
 
 .tray-menu-item {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 6px;
   background: var(--bg-overlay);
   color: var(--text-primary);
-  font-size: 12.5px;
-  padding: 8px 10px;
+  font-size: 12px;
+  padding: 6px 9px;
   cursor: pointer;
 }
 
@@ -920,12 +925,6 @@ button {
 
 .tray-menu-item.danger svg {
   color: var(--error-bright);
-}
-
-.tray-menu-divider {
-  height: 1px;
-  margin: 2px 6px;
-  background: var(--border-strong);
 }
 
 /* Right-click action menu for chat / project rows. */

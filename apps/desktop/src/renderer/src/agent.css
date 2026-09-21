@@ -561,6 +561,43 @@ details[open] .chevrons .chevron-up {
   border-top: 1px solid var(--bg-tinted);
 }
 
+/* GFM pipe tables */
+.markdown .table-wrap {
+  margin: 8px 0;
+  overflow-x: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+}
+
+.markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.markdown th,
+.markdown td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--bg-tinted);
+  vertical-align: top;
+}
+
+.markdown thead th {
+  background: var(--bg-raised);
+  color: var(--text-primary);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.markdown tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.markdown tbody tr:hover td {
+  background: var(--bg-tinted);
+}
+
 /* Attachments */
 .attach-chips {
   grid-column: 1 / -1;

@@ -4,7 +4,8 @@ import { useState } from "react";
 /**
  * Lightweight dependency-free markdown renderer for chat messages.
  * Supports: fenced code blocks, inline code, bold, italic, strikethrough,
- * links, headings (h1-h3), unordered/ordered lists, blockquotes and hr.
+ * links, headings (h1-h3), unordered/ordered lists, blockquotes, hr and
+ * GFM pipe tables.
  */
 
 const INLINE_RE =
@@ -118,8 +119,28 @@ function isBlockStart(line: string): boolean {
     /^#{1,3}\s/.test(line) ||
     isListMarker(line) !== null ||
     /^\s*>\s?/.test(line) ||
-    /^\s*(-{3,}|\*{3,})\s*$/.test(line)
+    /^\s*(-{3,}|\*{3,})\s*$/.test(line) ||
+    /^\s*\|/.test(line)
   );
+}
+
+function isTableRow(line: string | undefined): line is string {
+  return line !== undefined && line.trim() !== "" && line.includes("|");
+}
+
+// The row under a header: | --- | :---: | ... |
+function isTableSeparator(line: string | undefined): boolean {
+  if (line === undefined) return false;
+  const trimmed = line.trim();
+  if (!trimmed.includes("-") || !trimmed.includes("|")) return false;
+  return /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/.test(trimmed);
+}
+
+function splitTableRow(line: string): string[] {
+  let s = line.trim();
+  if (s.startsWith("|")) s = s.slice(1);
+  if (s.endsWith("|")) s = s.slice(0, -1);
+  return s.split("|").map((cell) => cell.trim());
 }
 
 function renderBlocks(text: string): ReactNode[] {
@@ -217,6 +238,44 @@ function renderBlocks(text: string): ReactNode[] {
         <blockquote key={`b${key++}`}>
           <p>{renderInline(quoted.join("\n"))}</p>
         </blockquote>,
+      );
+      continue;
+    }
+
+    // GFM pipe table: header row followed by a separator row.
+    if (isTableRow(line) && isTableSeparator(lines[i + 1])) {
+      const header = splitTableRow(line);
+      i += 2; // skip header and separator
+      const rows: string[][] = [];
+      for (;;) {
+        const next = lines[i];
+        if (!isTableRow(next)) break;
+        rows.push(splitTableRow(next));
+        i += 1;
+      }
+      blocks.push(
+        <div key={`b${key++}`} className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                {header.map((cell, n) => (
+                  <th key={n}>{renderInline(cell)}</th>
+                ))}
+              </tr>
+            </thead>
+            {rows.length > 0 ? (
+              <tbody>
+                {rows.map((row, r) => (
+                  <tr key={r}>
+                    {header.map((_cell, c) => (
+                      <td key={c}>{renderInline(row[c] ?? "")}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            ) : null}
+          </table>
+        </div>
       );
       continue;
     }

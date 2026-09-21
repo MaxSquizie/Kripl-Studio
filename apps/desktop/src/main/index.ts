@@ -836,12 +836,15 @@ function showTrayMenu(x: number, y: number): void {
     });
   }
 
+  const shownAt = Date.now();
   win.once("ready-to-show", () => {
     if (!win.isDestroyed()) win.show();
   });
-  // Clicking anywhere else dismisses the menu.
+  // Clicking anywhere else dismisses the menu. Ignore the first blur right
+  // after show — Windows can fire one spuriously and eat the whole menu.
   win.on("blur", () => {
-    if (!win.isDestroyed()) win.close();
+    if (win.isDestroyed() || Date.now() - shownAt < 250) return;
+    win.close();
   });
   win.on("closed", () => {
     trayMenuWindow = null;
@@ -857,6 +860,12 @@ function createTray(): void {
   tray.setToolTip("Kripl Studio");
 
   // Left click restores the window; right click opens the themed action menu.
+  // Windows delivers a right press as "right-click" (and sometimes also as
+  // "click" with button=right), so both events are handled.
+  const openMenuAtCursor = (): void => {
+    const point = screen.getCursorScreenPoint();
+    showTrayMenu(point.x, point.y);
+  };
   tray.on("click", (event) => {
     // Electron types this as KeyboardEvent; the real payload carries
     // button ("left" | "right") and a screen position.
@@ -864,12 +873,10 @@ function createTray(): void {
       button?: number | string;
       position?: { x: number; y: number };
     };
-    if ((click.button === "right" || click.button === 1) && click.position) {
-      showTrayMenu(click.position.x, click.position.y);
-    } else {
-      showMainWindow();
-    }
+    if (click.button === "right" || click.button === 1) openMenuAtCursor();
+    else showMainWindow();
   });
+  tray.on("right-click", openMenuAtCursor);
 }
 
 function createWindow(): BrowserWindow {

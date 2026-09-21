@@ -888,42 +888,46 @@ button {
 }
 
 /* Themed tray action menu (frameless transparent window). */
+/* Telegram-style tray card: rounded, softly shadowed, slightly translucent,
+   text-only items with generous spacing — in Kripl tokens. */
 .tray-menu-root {
   position: fixed;
   inset: 0;
   display: grid;
   align-content: start;
-  gap: 2px;
-  padding: 5px;
+  /* Margin for the card's soft shadow (clipped at window edges otherwise). */
+  padding: 10px;
   background: transparent;
 }
 
+.tray-menu-card {
+  display: grid;
+  gap: 1px;
+  padding: 5px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-raised) 96%, transparent);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.45),
+    inset 0 0 0 1px var(--border-strong);
+}
+
 .tray-menu-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  width: 100%;
+  text-align: left;
   border: 0;
   border-radius: 6px;
-  background: var(--bg-overlay);
+  background: transparent;
   color: var(--text-primary);
-  font-size: 12px;
-  padding: 6px 9px;
+  font-size: 13px;
+  padding: 8px 12px;
   cursor: pointer;
 }
 
-.tray-menu-item svg {
-  color: var(--kripl-accent-bright);
-}
-
 .tray-menu-item:hover {
-  background: var(--bg-tinted);
+  background: color-mix(in srgb, var(--kripl-accent) 14%, transparent);
 }
 
 .tray-menu-item.danger {
-  color: var(--error-bright);
-}
-
-.tray-menu-item.danger svg {
   color: var(--error-bright);
 }
 

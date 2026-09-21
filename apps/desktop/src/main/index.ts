@@ -800,8 +800,8 @@ function showTrayMenu(x: number, y: number): void {
     trayMenuWindow = null;
   }
 
-  const width = 184;
-  const height = 76;
+  const width = 190;
+  const height = 100;
   const display = screen.getDisplayNearestPoint({ x, y });
   const area = display.workArea;
   const menuX = Math.min(Math.max(area.x + 4, x - width + 8), area.x + area.width - width - 4);

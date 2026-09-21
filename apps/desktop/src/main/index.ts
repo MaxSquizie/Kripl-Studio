@@ -10,7 +10,7 @@ import {
 } from "@kripl/pi-adapter";
 import { PtyTerminalRuntime } from "@kripl/terminal";
 import { LocalWorkspaceRuntime } from "@kripl/workspace";
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Tray } from "electron";
 import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -577,6 +577,47 @@ async function initializeBrowserRuntime(window: BrowserWindow): Promise<void> {
   });
 }
 
+// Closing the window hides it to the tray; only an explicit quit destroys it.
+let isQuitting = false;
+let tray: Tray | null = null;
+
+function showMainWindow(): void {
+  const existing = BrowserWindow.getAllWindows()[0];
+  if (existing) {
+    if (!existing.isVisible()) existing.show();
+    existing.focus();
+    return;
+  }
+  const nextWindow = createWindow();
+  registerWindowControls(nextWindow);
+  void initializeBrowserRuntime(nextWindow);
+  initializeTerminalForwarding(nextWindow);
+  initializeContextForwarding(nextWindow);
+}
+
+function createTray(): void {
+  if (tray) return;
+  const icon = nativeImage.createFromPath(
+    join(app.getAppPath(), "resources", "tray-icon.png")
+  );
+  tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon.resize({ width: 16, height: 16 }));
+  tray.setToolTip("Kripl Studio");
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: "Show Kripl Studio", click: () => showMainWindow() },
+      { type: "separator" },
+      {
+        label: "Quit",
+        click: () => {
+          isQuitting = true;
+          app.quit();
+        }
+      }
+    ])
+  );
+  tray.on("double-click", () => showMainWindow());
+}
+
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1440,
@@ -592,6 +633,14 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true
+    }
+  });
+
+  // Close hides to the tray; a real quit (tray menu / OS) still works.
+  window.on("close", (event) => {
+    if (!isQuitting) {
+      event.preventDefault();
+      window.hide();
     }
   });
 
@@ -1514,6 +1563,7 @@ void app.whenReady().then(async () => {
   await restoreLastWorkspace();
 
   registerIpc();
+  createTray();
   const window = createWindow();
   registerWindowControls(window);
   await initializeBrowserRuntime(window);
@@ -1532,6 +1582,7 @@ void app.whenReady().then(async () => {
 });
 
 app.on("before-quit", () => {
+  isQuitting = true;
   browserUnsubscribe?.();
   browserUnsubscribe = undefined;
   terminalUnsubscribe?.();
@@ -1548,6 +1599,8 @@ app.on("before-quit", () => {
   void disposeActiveAgent();
 });
 
+// With the tray, closing the last window keeps the agent alive in the
+// background; only an explicit quit terminates the process.
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  if (isQuitting || process.platform === "darwin") app.quit();
 });

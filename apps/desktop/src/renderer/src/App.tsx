@@ -296,6 +296,7 @@ export function App() {
   }, [lightboxSrc]);
   const [terminalVisible, setTerminalVisible] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [workspaceSearchMode, setWorkspaceSearchMode] = useState<WorkspaceSearchMode | null>(null);
   const assistantMessageId = useRef<string | null>(null);
   // Ordered activity accumulated during the current run (reasoning text and
@@ -761,6 +762,21 @@ export function App() {
   }, [feed]);
   const tokenUsageUsed = usage ? (usage.input ?? 0) + (usage.cacheRead ?? 0) : 0;
 
+  // One toast per run when the context window crosses 90%.
+  const contextWarnedRef = useRef(false);
+  useEffect(() => {
+    if (!contextWindowLimit || contextWindowLimit <= 0) return;
+    const fraction = tokenUsageUsed / contextWindowLimit;
+    if (fraction >= 0.9 && !contextWarnedRef.current) {
+      contextWarnedRef.current = true;
+      pushToast(
+        "info",
+        `Context is ${Math.round(fraction * 100)}% used — consider starting a new chat.`
+      );
+    }
+    if (fraction < 0.75) contextWarnedRef.current = false;
+  }, [tokenUsageUsed, contextWindowLimit]);
+
   // Command palette entries, rebuilt when the relevant state changes.
   const paletteItems = useMemo<CommandItem[]>(() => {
     const items: CommandItem[] = [];
@@ -780,6 +796,12 @@ export function App() {
         run: () => setTerminalVisible((visible) => !visible)
       },
       { id: "settings", label: "Open settings", hint: "view", run: () => setSettingsOpen(true) },
+      {
+        id: "shortcuts",
+        label: "Keyboard shortcuts",
+        hint: "view",
+        run: () => setShortcutsOpen(true)
+      },
       { id: "probe", label: "Probe local model server", hint: "model", run: () => void probeModels() }
     );
 
@@ -2418,6 +2440,51 @@ export function App() {
         </aside>
 
       </div>
+
+      {shortcutsOpen && (
+        <div
+          className="interaction-backdrop"
+          role="presentation"
+          onClick={() => setShortcutsOpen(false)}
+        >
+          <section
+            className="shortcuts-dialog"
+            role="dialog"
+            aria-modal="true"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header>
+              <span>Keyboard shortcuts</span>
+              <button
+                type="button"
+                className="icon-button"
+                title="Close"
+                onClick={() => setShortcutsOpen(false)}
+              >
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                  <path d="M1.5 1.5l9 9M10.5 1.5l-9 9" stroke="currentColor" strokeWidth="1.2" />
+                </svg>
+              </button>
+            </header>
+            <div className="shortcuts-list">
+              {[
+                ["Ctrl+K", "Command palette (actions, projects, chats)"],
+                ["Ctrl+P", "Search files in the workspace"],
+                ["Ctrl+Shift+F", "Search text across files"],
+                ["Enter", "Send message"],
+                ["Shift+Enter", "New line in the composer"],
+                ["Esc", "Close dialogs, cancel rename"],
+                ["Drag & drop", "Drop files anywhere on the chat to attach"]
+              ].map(([keys, label]) => (
+                <div key={keys} className="shortcut-row">
+                  <span className="shortcut-keys">{keys}</span>
+                  <span>{label}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
 
       {settingsOpen && (
         <div className="interaction-backdrop" role="presentation" onClick={() => setSettingsOpen(false)}>

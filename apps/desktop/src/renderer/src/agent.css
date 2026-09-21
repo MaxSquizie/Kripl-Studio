@@ -998,3 +998,52 @@ summary {
   background: var(--bg-tinted);
   color: var(--error-bright);
 }
+
+/* Keyboard-shortcuts cheat sheet, same flat look as the settings dialog. */
+.shortcuts-dialog {
+  width: min(460px, calc(100vw - 48px));
+  border: none;
+  background: var(--bg-surface);
+  box-shadow: 0 28px 100px rgba(0, 0, 0, 0.5);
+}
+
+.shortcuts-dialog header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 26px;
+  padding: 12px 14px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.shortcuts-list {
+  display: grid;
+  padding: 4px 14px 14px;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 0;
+  border-top: 1px solid var(--bg-tinted);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
+.shortcut-row:first-child {
+  border-top: none;
+}
+
+.shortcut-keys {
+  flex: none;
+  min-width: 96px;
+  text-align: center;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 600;
+}

@@ -1,4 +1,4 @@
-import type { AgentEvent, AttachedFile, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
+import type { AgentEvent, AttachedFile, AgentInteractionResponse, AgentSessionSearchHit, AgentSessionSnapshot, AgentSessionSummary, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
 
 declare module "*.png" {
   const src: string;
@@ -75,6 +75,7 @@ declare global {
       }): Promise<ActionResult>;
       getAgentSessionSnapshot(): Promise<AgentSessionSnapshot | null>;
       exportAgentSession(sessionPath: string): Promise<AgentSessionSnapshot | null>;
+      searchAgentSessions(query: string): Promise<AgentSessionSearchHit[]>;
       sendAgentMessage(message: string): Promise<ActionResult>;
       pickAttachFiles(): Promise<string[]>;
       attachAgentFiles(paths: string[]): Promise<{

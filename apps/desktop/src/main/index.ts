@@ -1,4 +1,4 @@
-import type { AgentEvent, AttachedFile, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
+import type { AgentEvent, AttachedFile, AgentInteractionResponse, AgentSessionSearchHit, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
 import { JsonDesktopStateStore } from "@kripl/app-state";
 import { InspectableContextRuntime } from "@kripl/context-runtime";
 import { LocalOpenAIProvider } from "@kripl/local-openai-provider";
@@ -47,6 +47,7 @@ const IPC = {
   agentStart: "kripl:agent-start",
   agentSessionSnapshot: "kripl:agent-session-snapshot",
   agentExportSession: "kripl:agent-export-session",
+  agentSearchSessions: "kripl:agent-search-sessions",
   agentSend: "kripl:agent-send",
   pickAttachFiles: "kripl:pick-attach-files",
   agentAttachFiles: "kripl:agent-attach-files",
@@ -918,6 +919,69 @@ function registerIpc(): void {
       } catch {
         return null;
       }
+    }
+  );
+
+  // Full-text search across the workspace's saved chats.
+  ipcMain.handle(
+    IPC.agentSearchSessions,
+    async (_event, query: unknown): Promise<AgentSessionSearchHit[]> => {
+      const workspace = workspaceRuntime.descriptor();
+      if (!workspace || typeof query !== "string") return [];
+      const needle = query.trim().toLowerCase();
+      if (needle.length < 2) return [];
+
+      const sessions = await listWorkspaceSessions(workspace.path);
+      const hits: AgentSessionSearchHit[] = [];
+      for (const session of sessions.slice(0, 50)) {
+        let raw: string;
+        try {
+          raw = await readFile(session.path, "utf8");
+        } catch {
+          continue;
+        }
+        const records: unknown[] = [];
+        for (const line of raw.split("\n")) {
+          if (!line.trim()) continue;
+          let entry: unknown;
+          try {
+            entry = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          const record = entry as { type?: unknown; message?: unknown } | null;
+          if (
+            record &&
+            typeof record === "object" &&
+            record.type === "message" &&
+            record.message &&
+            typeof record.message === "object"
+          ) {
+            records.push(record.message);
+          }
+        }
+
+        let matches = 0;
+        for (const message of normalizePiSessionMessages(records)) {
+          const index = message.text.toLowerCase().indexOf(needle);
+          if (index < 0) continue;
+          matches += 1;
+          const start = Math.max(0, index - 60);
+          const end = Math.min(message.text.length, index + needle.length + 120);
+          hits.push({
+            sessionPath: session.path,
+            ...(session.name ? { sessionName: session.name } : {}),
+            role: message.role,
+            snippet:
+              (start > 0 ? "…" : "") +
+              message.text.slice(start, end).replace(/\s+/g, " ") +
+              (end < message.text.length ? "…" : "")
+          });
+          if (matches >= 3) break;
+        }
+        if (hits.length >= 24) break;
+      }
+      return hits;
     }
   );
 

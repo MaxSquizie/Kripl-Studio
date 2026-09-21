@@ -867,6 +867,40 @@ button {
   overflow-y: auto;
 }
 
+/* Full-text search across saved chats. */
+.session-search {
+  width: 100%;
+  margin-bottom: 6px;
+  border: 1px solid var(--bg-tinted);
+  border-radius: 8px;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 6px 9px;
+  outline: none;
+}
+
+.session-search:focus {
+  border-color: var(--kripl-accent);
+}
+
+.session-hit {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  border: 1px solid var(--bg-tinted);
+  background: var(--bg-surface);
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.session-hit:hover {
+  border-color: var(--info-dim);
+  background: var(--bg-overlay);
+}
+
 .session-row {
   display: flex;
   align-items: stretch;

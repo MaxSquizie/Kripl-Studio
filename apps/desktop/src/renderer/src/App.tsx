@@ -1,4 +1,4 @@
-import type { AgentEvent, AttachedFile, AgentInteractionRequest, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, ContextInspectorSnapshot, DesktopRuntimeSettings, DesktopUiState, RecentProject, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceEntry, WorkspaceFilePreview, WorkspaceGitStatus } from "@kripl/core";
+import type { AgentEvent, AttachedFile, AgentInteractionRequest, AgentInteractionResponse, AgentSessionSearchHit, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, ContextInspectorSnapshot, DesktopRuntimeSettings, DesktopUiState, RecentProject, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceEntry, WorkspaceFilePreview, WorkspaceGitStatus } from "@kripl/core";
 import { cleanAssistantToolText } from "@kripl/core";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent } from "react";
@@ -269,6 +269,9 @@ export function App() {
   const [usage, setUsage] =
     useState<{ input?: number; output?: number; cacheRead?: number } | null>(loadPersistedUsage);
   const [sessions, setSessions] = useState<AgentSessionSummary[]>([]);
+  // Full-text search across saved chats.
+  const [sessionQuery, setSessionQuery] = useState("");
+  const [sessionHits, setSessionHits] = useState<AgentSessionSearchHit[]>([]);
 
   const [windowMaximized, setWindowMaximized] = useState(false);
   const [contextWindowOverride, setContextWindowOverride] = useState(() => {
@@ -440,6 +443,27 @@ export function App() {
     window.addEventListener("keydown", onShortcut);
     return () => window.removeEventListener("keydown", onShortcut);
   }, [workspace]);
+
+  // Debounced session search; empty results while the query is too short.
+  useEffect(() => {
+    const query = sessionQuery.trim();
+    if (!workspace || query.length < 2) {
+      setSessionHits([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void window.kripl
+        .searchAgentSessions(query)
+        .then((hits) => {
+          if (!cancelled) setSessionHits(hits);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [sessionQuery, workspace]);
 
   // Ctrl+K toggles the command palette (works without a workspace too).
   useEffect(() => {
@@ -2409,6 +2433,39 @@ export function App() {
               <p className="sidebar-note">Connect a local model and pick one first.</p>
             ) : (
               <>
+                <input
+                  className="session-search"
+                  value={sessionQuery}
+                  placeholder="Поиск по чатам…"
+                  spellCheck={false}
+                  onChange={(event) => setSessionQuery(event.target.value)}
+                />
+                {sessionQuery.trim().length >= 2 ? (
+                  sessionHits.length === 0 ? (
+                    <p className="sidebar-note">Ничего не найдено.</p>
+                  ) : (
+                    <div className="session-list">
+                      {sessionHits.map((hit, index) => (
+                        <button
+                          key={`${hit.sessionPath}-${index}`}
+                          type="button"
+                          className="session-hit"
+                          title={hit.snippet}
+                          onClick={() => void startAgent(hit.sessionPath)}
+                        >
+                          <span className="session-name">
+                            {hit.sessionName ?? basename(hit.sessionPath)}
+                          </span>
+                          <span className="session-meta">
+                            {hit.role === "user" ? "вы" : hit.role === "assistant" ? "Kripl" : "tool"} ·{" "}
+                            {hit.snippet}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )
+                ) : (
+                  <>
                 {sessions.length === 0 && (
                   <p className="sidebar-note">No saved chats yet for this project.</p>
                 )}
@@ -2500,6 +2557,8 @@ export function App() {
                       </div>
                     ))}
                 </div>
+                  </>
+                )}
               </>
             )}
           </CollapsibleDetails>

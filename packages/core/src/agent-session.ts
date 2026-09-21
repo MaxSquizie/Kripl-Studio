@@ -10,6 +10,14 @@ export interface AgentSessionSummary {
   firstMessage: string;
 }
 
+/** One full-text match inside a saved chat (session search). */
+export interface AgentSessionSearchHit {
+  sessionPath: string;
+  sessionName?: string;
+  role: "user" | "assistant" | "tool" | "system";
+  snippet: string;
+}
+
 export interface AgentSessionMessage {
   role: "user" | "assistant" | "tool" | "system";
   text: string;

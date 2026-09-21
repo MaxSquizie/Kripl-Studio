@@ -1,4 +1,4 @@
-import type { AgentEvent, AttachedFile, AgentInteractionResponse, AgentSessionSnapshot, AgentSessionSummary, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
+import type { AgentEvent, AttachedFile, AgentInteractionResponse, AgentSessionSearchHit, AgentSessionSnapshot, AgentSessionSummary, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
 import { contextBridge, ipcRenderer } from "electron";
 
 const IPC = {
@@ -35,6 +35,7 @@ const IPC = {
   agentStart: "kripl:agent-start",
   agentSessionSnapshot: "kripl:agent-session-snapshot",
   agentExportSession: "kripl:agent-export-session",
+  agentSearchSessions: "kripl:agent-search-sessions",
   agentSend: "kripl:agent-send",
   pickAttachFiles: "kripl:pick-attach-files",
   agentAttachFiles: "kripl:agent-attach-files",
@@ -198,6 +199,9 @@ const api = {
       IPC.agentExportSession,
       sessionPath
     ) as Promise<AgentSessionSnapshot | null>,
+
+  searchAgentSessions: (query: string) =>
+    ipcRenderer.invoke(IPC.agentSearchSessions, query) as Promise<AgentSessionSearchHit[]>,
 
   sendAgentMessage: (message: string) =>
     ipcRenderer.invoke(IPC.agentSend, message) as Promise<ActionResult>,

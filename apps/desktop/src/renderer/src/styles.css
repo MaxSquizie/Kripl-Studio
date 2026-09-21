@@ -320,32 +320,57 @@ button {
   padding: 30px;
 }
 
-/* Sticky anchor at the end of the scroll content; pins the pill to the
-   visible bottom while the user is scrolled up. */
+/* Sticky anchor at the end of the scroll content; pins the button to the
+   visible bottom-right (above the composer, left of the scrollbar). */
 .jump-anchor {
   position: sticky;
-  bottom: 12px;
+  bottom: 10px;
   display: flex;
-  justify-content: center;
+  justify-content: flex-end;
   height: 0;
 }
 
-/* Floating pill that appears while the user is scrolled up. */
+/* Round jump-to-bottom button in the app's icon-button style. The anchor is
+   a zero-height sticky line, so the button grows upward from it or the
+   overflow:auto container clips it. */
 .jump-to-bottom {
-  /* The anchor is a zero-height sticky line near the scrollport bottom; grow
-     the pill upward from it or the overflow:auto container clips it. */
+  position: relative;
+  /* Nudge into the conversation padding so the button lines up with the
+     composer's right edge (both use ~18px horizontal insets). */
+  margin-right: -12px;
   transform: translateY(calc(-100% - 6px));
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
   border: 1px solid var(--border-subtle);
-  border-radius: 999px;
+  border-radius: 50%;
   background: var(--bg-raised);
   color: var(--text-secondary);
-  font-size: 11px;
-  padding: 5px 12px;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+}
+
+.jump-to-bottom:hover {
+  border-color: var(--kripl-accent);
+  color: var(--text-primary);
+}
+
+/* New-message counter badge on the button corner. */
+.jump-count {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  display: grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--kripl-accent);
+  color: #0c120f;
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .jump-to-bottom:hover {

@@ -2012,7 +2012,18 @@ export function App() {
                     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
                   }}
                 >
-                  ↓{pendingMessages > 0 ? ` ${pendingMessages}` : ""}
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path
+                      d="M12 5v13m0 0l-5.5-5.5M12 18l5.5-5.5"
+                      stroke="currentColor"
+                      strokeWidth="2.1"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  {pendingMessages > 0 && (
+                    <span className="jump-count">{pendingMessages}</span>
+                  )}
                 </button>
               )}
             </div>

@@ -272,6 +272,8 @@ export function App() {
   // Full-text search across saved chats.
   const [sessionQuery, setSessionQuery] = useState("");
   const [sessionHits, setSessionHits] = useState<AgentSessionSearchHit[]>([]);
+  // The search box is hidden behind the magnifier in the Sessions header.
+  const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
 
   const [windowMaximized, setWindowMaximized] = useState(false);
   const [contextWindowOverride, setContextWindowOverride] = useState(() => {
@@ -1872,6 +1874,7 @@ export function App() {
           onSelectTerminal={() => setTerminalVisible(true)}
           onCloseTerminal={() => setTerminalVisible(false)}
           onOpenSettings={() => setSettingsOpen(true)}
+          onShowShortcuts={() => setShortcutsOpen(true)}
         />
 
         <main
@@ -2390,6 +2393,27 @@ export function App() {
             summary={
               <span className="session-heading">
                 <span className="eyebrow">Sessions</span>
+                <button
+                  className={"icon-button session-search-toggle" + (sessionSearchOpen ? " active" : "")}
+                  type="button"
+                  title={sessionSearchOpen ? "Hide chat search" : "Search across chats"}
+                  onClick={(event) => {
+                    event.preventDefault(); // do not toggle the panel
+                    const next = !sessionSearchOpen;
+                    if (!next) setSessionQuery("");
+                    setSessionSearchOpen(next);
+                  }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+                    <path
+                      d="M15.3 15.3L20 20"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
                 <span className="session-heading-actions">
                   <button
                     className="icon-button"
@@ -2433,14 +2457,17 @@ export function App() {
               <p className="sidebar-note">Connect a local model and pick one first.</p>
             ) : (
               <>
-                <input
-                  className="session-search"
-                  value={sessionQuery}
-                  placeholder="Поиск по чатам…"
-                  spellCheck={false}
-                  onChange={(event) => setSessionQuery(event.target.value)}
-                />
-                {sessionQuery.trim().length >= 2 ? (
+                {sessionSearchOpen && (
+                  <input
+                    className="session-search"
+                    value={sessionQuery}
+                    placeholder="Поиск по чатам…"
+                    spellCheck={false}
+                    autoFocus
+                    onChange={(event) => setSessionQuery(event.target.value)}
+                  />
+                )}
+                {sessionSearchOpen && sessionQuery.trim().length >= 2 ? (
                   sessionHits.length === 0 ? (
                     <p className="sidebar-note">Ничего не найдено.</p>
                   ) : (

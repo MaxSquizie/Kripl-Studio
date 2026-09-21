@@ -32,6 +32,7 @@ interface WorkspaceSidebarProps {
   onSelectTerminal(): void;
   onCloseTerminal(): void;
   onOpenSettings(): void;
+  onShowShortcuts(): void;
 }
 
 const STATUS_LABEL: Record<WorkspaceChange["status"], string> = {
@@ -129,7 +130,8 @@ export function WorkspaceSidebar({
   terminalOpen,
   onSelectTerminal,
   onCloseTerminal,
-  onOpenSettings
+  onOpenSettings,
+  onShowShortcuts
 }: WorkspaceSidebarProps) {
   return (
     <aside className={"sidebar workspace-sidebar" + (terminalOpen ? " terminal-mode" : "")}>
@@ -152,6 +154,30 @@ export function WorkspaceSidebar({
             </button>
             <button className="icon-button" type="button" onClick={onOpenWorkspace} title="Open project">
               +
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              onClick={onShowShortcuts}
+              title="Keyboard shortcuts cheat sheet"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect
+                  x="2.5"
+                  y="6"
+                  width="19"
+                  height="12"
+                  rx="2"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                />
+                <path
+                  d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 13h.01M18 13h.01M9 13h6"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
+              </svg>
             </button>
           </div>
         </div>

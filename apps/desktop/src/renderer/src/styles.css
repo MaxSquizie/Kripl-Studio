@@ -843,21 +843,36 @@ button {
 }
 
 /* Collapsed Sessions header shows only the title and chevron. */
-.session-card:not([open]) .session-heading-actions .icon-button {
+.session-card:not([open]) .session-heading-actions .icon-button,
+.session-card:not([open]) .session-search-toggle {
   display: none;
 }
 
 .session-heading {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: 4px;
   margin-bottom: 8px;
+}
+
+/* Magnifier right after the SESSIONS label; accent while search is open. */
+.session-search-toggle {
+  width: 22px;
+  height: 22px;
+  color: var(--text-muted);
+}
+
+.session-search-toggle.active {
+  background: color-mix(in srgb, var(--kripl-accent) 16%, transparent);
+  color: var(--kripl-accent-bright);
 }
 
 .session-heading-actions {
   display: inline-flex;
   align-items: center;
   gap: 2px;
+  margin-left: auto;
 }
 
 .session-list {

@@ -10,7 +10,16 @@ import {
 } from "@kripl/pi-adapter";
 import { PtyTerminalRuntime } from "@kripl/terminal";
 import { LocalWorkspaceRuntime } from "@kripl/workspace";
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Tray } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeImage,
+  Tray,
+  type MenuItemConstructorOptions
+} from "electron";
 import { autoUpdater } from "electron-updater";
 import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -629,20 +638,29 @@ function createTray(): void {
   );
   tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon.resize({ width: 16, height: 16 }));
   tray.setToolTip("Kripl Studio");
+
+  const menuItem = (
+    name: string,
+    label: string,
+    onClick: () => void
+  ): MenuItemConstructorOptions => {
+    const item: MenuItemConstructorOptions = { label, click: onClick };
+    const icon = nativeImage.createFromPath(join(app.getAppPath(), "resources", name));
+    if (!icon.isEmpty()) item.icon = icon;
+    return item;
+  };
+  // Left click restores the window; right click opens the action menu.
+  tray.on("click", () => showMainWindow());
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: "Show Kripl Studio", click: () => showMainWindow() },
+      menuItem("tray-menu-show.png", "Show Kripl Studio", () => showMainWindow()),
       { type: "separator" },
-      {
-        label: "Quit",
-        click: () => {
-          isQuitting = true;
-          app.quit();
-        }
-      }
+      menuItem("tray-menu-quit.png", "Quit", () => {
+        isQuitting = true;
+        app.quit();
+      })
     ])
   );
-  tray.on("double-click", () => showMainWindow());
 }
 
 function createWindow(): BrowserWindow {

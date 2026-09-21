@@ -11,6 +11,7 @@ import {
 import { PtyTerminalRuntime } from "@kripl/terminal";
 import { LocalWorkspaceRuntime } from "@kripl/workspace";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Tray } from "electron";
+import { autoUpdater } from "electron-updater";
 import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -575,6 +576,32 @@ async function initializeBrowserRuntime(window: BrowserWindow): Promise<void> {
       window.webContents.send(IPC.browserState, state);
     }
   });
+}
+
+// GitHub Releases feed for the packaged app (dev builds skip updates).
+function initializeAutoUpdates(): void {
+  if (!app.isPackaged) return;
+  try {
+    autoUpdater.autoDownload = true;
+    autoUpdater.on("error", (error) => {
+      console.warn("[updater]", error);
+    });
+    autoUpdater.on("update-downloaded", () => {
+      const choice = dialog.showMessageBoxSync({
+        type: "info",
+        title: "Kripl Studio",
+        message: "A new version of Kripl Studio is ready to install.",
+        detail: "Restart now to apply the update?",
+        buttons: ["Restart", "Later"],
+        defaultId: 0,
+        cancelId: 1
+      });
+      if (choice === 0) autoUpdater.quitAndInstall();
+    });
+    void autoUpdater.checkForUpdates();
+  } catch (error) {
+    console.warn("[updater] init failed:", error);
+  }
 }
 
 // Closing the window hides it to the tray; only an explicit quit destroys it.
@@ -1564,6 +1591,7 @@ void app.whenReady().then(async () => {
 
   registerIpc();
   createTray();
+  initializeAutoUpdates();
   const window = createWindow();
   registerWindowControls(window);
   await initializeBrowserRuntime(window);

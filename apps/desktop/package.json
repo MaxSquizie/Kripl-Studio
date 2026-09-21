@@ -14,16 +14,16 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.85.1",
+    "@kripl/app-state": "0.0.1",
+    "@kripl/context-runtime": "0.0.1",
     "@kripl/core": "0.0.1",
     "@kripl/local-openai-provider": "0.0.1",
     "@kripl/pi-adapter": "0.0.1",
-    "@kripl/workspace": "0.0.1",
     "@kripl/terminal": "0.0.1",
-    "@xterm/xterm": "6.0.0",
+    "@kripl/workspace": "0.0.1",
     "@xterm/addon-fit": "0.11.0",
-    "node-pty": "1.1.0",
-    "@kripl/app-state": "0.0.1",
-    "@kripl/context-runtime": "0.0.1"
+    "@xterm/xterm": "6.0.0",
+    "node-pty": "1.1.0"
   },
   "devDependencies": {
     "@types/node": "22.20.3",
@@ -32,6 +32,7 @@
     "@vitejs/plugin-react": "5.2.0",
     "electron": "44.4.2",
     "electron-builder": "26.15.3",
+    "electron-updater": "6.8.9",
     "electron-vite": "5.0.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -62,6 +63,11 @@
     "nativeRebuilder": "sequential",
     "asarUnpack": [
       "node_modules/node-pty/**"
-    ]
+    ],
+    "publish": {
+      "provider": "github",
+      "owner": "MaxSquizie",
+      "repo": "Kripl-Studio"
+    }
   }
 }

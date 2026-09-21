@@ -773,6 +773,7 @@ button {
   border: 1px solid var(--bg-tinted);
   background: var(--bg-surface);
   padding: 4px;
+  position: relative; /* anchor for the live snake border */
 }
 
 .recent-project-row.active {
@@ -1029,7 +1030,9 @@ button {
 }
 
 .session-row.live::before,
-.session-row.live::after {
+.session-row.live::after,
+.recent-project-row.live::before,
+.recent-project-row.live::after {
   content: "";
   position: absolute;
   inset: -1px;
@@ -1056,7 +1059,8 @@ button {
   animation: snake-run 2.6s linear infinite;
 }
 
-.session-row.live::after {
+.session-row.live::after,
+.recent-project-row.live::after {
   background:
     conic-gradient(
       from calc(var(--snake-angle) + 180deg - 100deg),

@@ -78,9 +78,13 @@ declare global {
       >;
       deleteAgentSession(sessionPath: string): Promise<ActionResult>;
       trayMenuAction(action: "show" | "quit" | "close"): Promise<void>;
-      listLiveAgents(): Promise<Array<{ sessionPath?: string; running: boolean }>>;
+      listLiveAgents(): Promise<
+        Array<{ sessionPath?: string; workspacePath?: string; running: boolean }>
+      >;
       onAgentLiveChanged(
-        listener: (live: Array<{ sessionPath?: string; running: boolean }>) => void
+        listener: (
+          live: Array<{ sessionPath?: string; workspacePath?: string; running: boolean }>
+        ) => void
       ): () => void;
       getAgentSessionSnapshot(): Promise<AgentSessionSnapshot | null>;
       exportAgentSession(sessionPath: string): Promise<AgentSessionSnapshot | null>;

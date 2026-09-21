@@ -352,6 +352,8 @@ export function App() {
   const [sessions, setSessions] = useState<AgentSessionSummary[]>([]);
   // Chats whose agent is still running (possibly in the background).
   const [liveSessionPaths, setLiveSessionPaths] = useState<Set<string>>(new Set());
+  // Projects that currently have a running agent (snake indicator on rows).
+  const [liveProjectPaths, setLiveProjectPaths] = useState<Set<string>>(new Set());
   // Full-text search across saved chats.
   const [sessionQuery, setSessionQuery] = useState("");
   const [sessionHits, setSessionHits] = useState<AgentSessionSearchHit[]>([]);
@@ -480,9 +482,18 @@ export function App() {
       if (!disposed) void refreshSessions();
     });
 
-    const applyLiveAgents = (live: Array<{ sessionPath?: string; running: boolean }>): void => {
+    const applyLiveAgents = (
+      live: Array<{ sessionPath?: string; workspacePath?: string; running: boolean }>
+    ): void => {
       setLiveSessionPaths(
         new Set(live.map((item) => item.sessionPath).filter((path): path is string => Boolean(path)))
+      );
+      setLiveProjectPaths(
+        new Set(
+          live
+            .map((item) => item.workspacePath)
+            .filter((path): path is string => Boolean(path))
+        )
       );
     };
     const unsubscribeLive = window.kripl.onAgentLiveChanged((live) => {
@@ -2829,6 +2840,7 @@ export function App() {
 
           <RecentProjectsCard
             projects={recentProjects}
+            livePaths={liveProjectPaths}
             currentPath={workspace?.path}
             onOpen={(path) => void openRecentProject(path)}
             onContextMenu={(project, event) => openProjectMenu(event, project)}

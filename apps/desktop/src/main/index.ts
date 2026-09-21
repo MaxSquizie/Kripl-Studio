@@ -95,6 +95,8 @@ let activeAgent: PiAgentRuntime | undefined;
 let activeAgentUnsubscribe: (() => void) | undefined;
 let activeAgentStatus: AgentStatus = "idle";
 let activeAgentModel: { endpoint: string; modelId: string } | undefined;
+// Workspace the active agent runs in (for live-project indicators).
+let activeAgentWorkspace: string | undefined;
 
 // Parked agents keep running in the background while the user works with a
 // different chat or project. Keyed by runtime id.
@@ -220,20 +222,37 @@ async function validatedSessionPath(
 }
 
 /** Which agents are alive right now (active + parked in the background). */
-async function listLiveAgents(): Promise<Array<{ sessionPath?: string; running: boolean }>> {
-  const entries: Array<{ agent: PiAgentRuntime; status: AgentStatus }> = [];
-  if (activeAgent) entries.push({ agent: activeAgent, status: activeAgentStatus });
+async function listLiveAgents(): Promise<
+  Array<{ sessionPath?: string; workspacePath?: string; running: boolean }>
+> {
+  const entries: Array<{
+    agent: PiAgentRuntime;
+    status: AgentStatus;
+    workspacePath?: string;
+  }> = [];
+  if (activeAgent) {
+    entries.push({
+      agent: activeAgent,
+      status: activeAgentStatus,
+      ...(activeAgentWorkspace ? { workspacePath: activeAgentWorkspace } : {})
+    });
+  }
   for (const slot of backgroundAgents.values()) {
-    entries.push({ agent: slot.agent, status: slot.status });
+    entries.push({
+      agent: slot.agent,
+      status: slot.status,
+      ...(slot.workspacePath ? { workspacePath: slot.workspacePath } : {})
+    });
   }
 
-  const live: Array<{ sessionPath?: string; running: boolean }> = [];
+  const live: Array<{ sessionPath?: string; workspacePath?: string; running: boolean }> = [];
   for (const entry of entries) {
     const running = entry.status === "running" || entry.status === "stopping";
     if (!running) continue;
     const file = await liveSessionFile(entry.agent);
     live.push({
       ...(file ? { sessionPath: file } : {}),
+      ...(entry.workspacePath ? { workspacePath: entry.workspacePath } : {}),
       running
     });
   }
@@ -571,6 +590,7 @@ async function disposeActiveAgent(): Promise<void> {
   }
   activeAgent = undefined;
   activeAgentModel = undefined;
+  activeAgentWorkspace = undefined;
   activeAgentUnsubscribe?.();
   activeAgentUnsubscribe = undefined;
   activeAgentStatus = "stopped";
@@ -651,6 +671,7 @@ function parkActiveAgentInBackground(): void {
 
   activeAgent = undefined;
   activeAgentModel = undefined;
+  activeAgentWorkspace = undefined;
   activeAgentStatus = "idle";
 }
 
@@ -680,6 +701,7 @@ function promoteBackgroundAgent(id: number): boolean {
 
   activeAgent = slot.agent;
   if (slot.model) activeAgentModel = slot.model;
+  activeAgentWorkspace = slot.workspacePath;
   activeAgentStatus = slot.status === "stopped" ? "ready" : slot.status;
   activeAgentUnsubscribe?.();
   activeAgentUnsubscribe = slot.agent.subscribe((event) => {
@@ -1390,6 +1412,7 @@ function registerIpc(): void {
 
       activeAgent = agent;
       activeAgentModel = { endpoint: localModel.endpoint, modelId: localModel.modelId };
+      activeAgentWorkspace = workspace.path;
       activeAgentStatus = "starting";
       const agentId = agentIdOf(agent);
       activeAgentUnsubscribe = agent.subscribe((agentEvent) => {

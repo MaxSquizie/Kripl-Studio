@@ -213,12 +213,19 @@ const api = {
   listLiveAgents: () =>
     ipcRenderer.invoke(
       IPC.agentLiveSessions
-    ) as Promise<Array<{ sessionPath?: string; running: boolean }>>,
+    ) as Promise<Array<{ sessionPath?: string; workspacePath?: string; running: boolean }>>,
 
-  onAgentLiveChanged: (listener: (live: Array<{ sessionPath?: string; running: boolean }>) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, live: unknown): void =>
-      listener(live as Array<{ sessionPath?: string; running: boolean }>);
-    ipcRenderer.on(IPC.agentLiveChanged, handler);
+  onAgentLiveChanged:
+    (
+      listener: (
+        live: Array<{ sessionPath?: string; workspacePath?: string; running: boolean }>
+      ) => void
+    ) => {
+      const handler = (_event: Electron.IpcRendererEvent, live: unknown): void =>
+        listener(
+          live as Array<{ sessionPath?: string; workspacePath?: string; running: boolean }>
+        );
+      ipcRenderer.on(IPC.agentLiveChanged, handler);
     return () => {
       ipcRenderer.removeListener(IPC.agentLiveChanged, handler);
     };

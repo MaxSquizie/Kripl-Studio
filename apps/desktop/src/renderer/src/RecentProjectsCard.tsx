@@ -14,6 +14,8 @@ function formatRelativeTime(timestamp: number): string {
 
 interface RecentProjectsCardProps {
   projects: RecentProject[];
+  /** Project paths with a running agent — rows get the live snake border. */
+  livePaths?: ReadonlySet<string>;
   currentPath?: string | undefined;
   onOpen(path: string): void;
   onContextMenu(project: RecentProject, event: MouseEvent): void;
@@ -22,6 +24,7 @@ interface RecentProjectsCardProps {
 /** Right-rail card for quick switching between recent repositories. */
 export function RecentProjectsCard({
   projects,
+  livePaths,
   currentPath,
   onOpen,
   onContextMenu
@@ -56,7 +59,8 @@ export function RecentProjectsCard({
               key={project.path}
               className={
                 "recent-project-row" +
-                (currentPath === project.path ? " active" : "")
+                (currentPath === project.path ? " active" : "") +
+                (livePaths?.has(project.path) ? " live" : "")
               }
               onContextMenu={(event) => onContextMenu(project, event)}
             >

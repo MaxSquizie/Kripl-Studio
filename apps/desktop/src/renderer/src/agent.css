@@ -2,6 +2,10 @@
   display: grid;
   gap: 14px;
   width: min(880px, 100%);
+  /* Safety net: no feed item may ever stretch the column wide enough to
+     trigger a horizontal scrollbar (see .chat-message). */
+  max-width: 100%;
+  overflow-x: hidden;
   margin: 0 auto;
 }
 
@@ -29,6 +33,13 @@
 .chat-message {
   display: grid;
   gap: 7px;
+  /* Grid items default to min-width:auto, so a single unbreakable line
+     (long inline code, URL, table row) would stretch the bubble far past
+     the column and make Chromium allocate GPU buffers for the whole
+     stretched area — that is what OOM-killed the renderer on huge chats.
+     Constrain the item so wide content scrolls inside instead. */
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid var(--bg-tinted);
   border-radius: 12px;
   background: var(--bg-surface);
@@ -292,6 +303,8 @@ details[open] .chevrons .chevron-up {
 }
 
 .message-text {
+  min-width: 0;
+  max-width: 100%;
   color: var(--text-primary);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -309,6 +322,8 @@ details[open] .chevrons .chevron-up {
 
 .thinking-card,
 .tool-card {
+  min-width: 0;
+  max-width: 100%;
   border: 1px solid var(--bg-tinted);
   border-radius: 9px;
   background: var(--bg-surface);
@@ -543,6 +558,9 @@ details[open] .chevrons .chevron-up {
   background: var(--bg-overlay);
   border-radius: 4px;
   padding: 1px 5px;
+  /* Long unbreakable tokens in inline code must wrap, not stretch the
+     bubble (see .chat-message). */
+  overflow-wrap: anywhere;
 }
 
 .markdown pre {
@@ -551,6 +569,7 @@ details[open] .chevrons .chevron-up {
   background: var(--bg-app);
   border: 1px solid var(--bg-tinted);
   border-radius: 8px;
+  max-width: 100%;
   overflow-x: auto;
 }
 
@@ -558,6 +577,9 @@ details[open] .chevrons .chevron-up {
   background: none;
   padding: 0;
   font-size: 12px;
+  /* Code blocks keep horizontal scrolling for long lines. */
+  overflow-wrap: normal;
+  white-space: pre;
 }
 
 .markdown blockquote {
@@ -585,6 +607,7 @@ details[open] .chevrons .chevron-up {
 /* GFM pipe tables */
 .markdown .table-wrap {
   margin: 8px 0;
+  max-width: 100%;
   overflow-x: auto;
   border: 1px solid var(--border-strong);
   border-radius: 8px;

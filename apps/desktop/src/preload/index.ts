@@ -1,5 +1,5 @@
 import type { AgentEvent, AgentStatus, AttachedFile, AgentInteractionResponse, AgentSessionSearchHit, AgentSessionSnapshot, AgentSessionSummary, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 const IPC = {
   appInfo: "kripl:app-info",
@@ -273,6 +273,16 @@ const api = {
       mime?: string;
       dataUrl?: string;
     }>,
+
+  // File.path was removed from the web File object in recent Electron; this is
+  // the supported way to resolve a dropped file's path.
+  dropFilePath: (file: File): string => {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return "";
+    }
+  },
 
   abortAgent: () => ipcRenderer.invoke(IPC.agentAbort) as Promise<ActionResult>,
 

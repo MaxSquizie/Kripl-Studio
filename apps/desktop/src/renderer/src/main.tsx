@@ -66,6 +66,27 @@ if (!window.kripl) {
     void window.kripl?.logRendererError(`Unhandled rejection: ${reason}`);
   });
 
+  // Heap trace that survives React crashes: if the renderer dies from OOM,
+  // these lines show whether memory grew steadily (leak) or spiked (content).
+  const chromiumMemory = (
+    window as unknown as {
+      performance?: { memory?: { usedJSHeapSize: number; jsHeapSizeLimit: number } };
+    }
+  ).performance?.memory;
+  if (chromiumMemory) {
+    void window.kripl?.logRendererError(
+      `Renderer loaded (heap ${Math.round(chromiumMemory.usedJSHeapSize / 1048576)}MB)`
+    );
+    const memoryTimer = window.setInterval(() => {
+      void window.kripl
+        ?.logRendererError(
+          `mem ${Math.round(chromiumMemory.usedJSHeapSize / 1048576)}MB / limit ${Math.round(chromiumMemory.jsHeapSizeLimit / 1048576)}MB`
+        )
+        .catch(() => undefined);
+    }, 60_000);
+    window.addEventListener("pagehide", () => window.clearInterval(memoryTimer));
+  }
+
   // The tray action menu runs in its own tiny frameless window.
   const isTrayMenu = window.location.search.includes("tray-menu=1");
   if (isTrayMenu) {

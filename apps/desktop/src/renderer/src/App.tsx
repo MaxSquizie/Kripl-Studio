@@ -1162,8 +1162,13 @@ export function App() {
         item.kind === "message" && Boolean(item.imagePaths?.length)
     );
     if (pending.length > 0) {
+      // Cap the number of previews restored per session: screenshot-heavy
+      // chats would otherwise pull every image into renderer memory at once.
+      let budget = 12;
       for (const item of pending) {
         for (const path of item.imagePaths ?? []) {
+          if (budget <= 0) break;
+          budget -= 1;
           void window.kripl.readAttachPreview(path).then((result) => {
             if (!result.ok || !result.dataUrl) return;
             const dataUrl = result.dataUrl;
@@ -2268,8 +2273,9 @@ export function App() {
           onDrop={(event) => {
             event.preventDefault();
             setDragActive(false);
+            // File.path is gone in modern Electron; resolve via webUtils.
             const paths = Array.from(event.dataTransfer.files)
-              .map((file) => (file as File & { path?: string }).path ?? "")
+              .map((file) => window.kripl.dropFilePath(file))
               .filter(Boolean);
             if (paths.length > 0) void addAttachments(paths);
           }}

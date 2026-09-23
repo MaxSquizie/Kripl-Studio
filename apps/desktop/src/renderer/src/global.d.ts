@@ -102,6 +102,7 @@ declare global {
         error?: string;
         files?: AttachedFile[];
       }>;
+      dropFilePath(file: File): string;
       readAttachPreview(path: string): Promise<{
         ok: boolean;
         error?: string;

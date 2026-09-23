@@ -12,6 +12,7 @@ const IPC = {
   openRecentProject: "kripl:open-recent-project",
   trayMenuAction: "kripl:tray-menu-action",
   rendererError: "kripl:renderer-error",
+  diagLog: "kripl:diag-log",
   forgetRecentProject: "kripl:forget-recent-project",
   saveDesktopUi: "kripl:save-desktop-ui",
   saveRuntimeSettings: "kripl:save-runtime-settings",
@@ -213,6 +214,8 @@ const api = {
 
   logRendererError: (text: string) =>
     ipcRenderer.invoke(IPC.rendererError, text) as Promise<void>,
+  diagLog: (line: string) =>
+    ipcRenderer.invoke(IPC.diagLog, line) as Promise<void>,
 
   listLiveAgents: () =>
     ipcRenderer.invoke(

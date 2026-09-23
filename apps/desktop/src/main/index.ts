@@ -20,6 +20,15 @@ import { ToolBridgeServer } from "./tool-bridge.js";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 
+// Append one diagnostics line from the main process (agent lifecycle, IPC
+// timings). Renderer lines arrive via kripl:diag-log into the same file.
+function diagMain(line: string): void {
+  appendFile(
+    join(app.getPath("userData"), "diagnostics.log"),
+    `[${new Date().toISOString()}] [main] ${line}\n`
+  ).catch(() => undefined);
+}
+
 const IPC = {
   appInfo: "kripl:app-info",
   pickWorkspace: "kripl:pick-workspace",
@@ -46,6 +55,7 @@ const IPC = {
   workspaceGitStatus: "kripl:workspace-git-status",
   workspaceCommit: "kripl:workspace-commit",
   probeLocalModels: "kripl:probe-local-models",
+  diagLog: "kripl:diag-log",
   agentSessions: "kripl:agent-sessions",
   agentStart: "kripl:agent-start",
   agentAttach: "kripl:agent-attach",
@@ -1009,6 +1019,16 @@ function registerIpc(): void {
     );
   });
 
+  // Free-form diagnostics from both main and renderer (chat-open tracing,
+  // long-task freezes, ...). One line per call, capped to keep the file sane.
+  ipcMain.handle(IPC.diagLog, (_event, line: unknown): void => {
+    if (typeof line !== "string" || !line.trim()) return;
+    appendFile(
+      join(app.getPath("userData"), "diagnostics.log"),
+      line.slice(0, 2_000) + "\n"
+    ).catch(() => undefined);
+  });
+
   ipcMain.handle(IPC.appInfo, () => {
     const runtime = requireDesktopStateStore().snapshot().runtime;
     return {
@@ -1255,7 +1275,17 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.agentSessionSnapshot, async (): Promise<AgentSessionSnapshot | null> => {
     if (!activeAgent) return null;
-    return activeAgent.getSessionSnapshot();
+    const t0 = Date.now();
+    try {
+      const snapshot = await activeAgent.getSessionSnapshot();
+      diagMain(
+        `snapshot done in ${Date.now() - t0}ms messages=${snapshot?.messageCount ?? 0}`
+      );
+      return snapshot;
+    } catch (error) {
+      diagMain(`snapshot failed after ${Date.now() - t0}ms: ${String(error)}`);
+      throw error;
+    }
   });
 
   // Export any session file (JSONL) as normalized messages for Markdown export.
@@ -1459,10 +1489,15 @@ function registerIpc(): void {
         }
       });
 
+      const tStart = Date.now();
+      diagMain(
+        `agent.start begin session=${sessionPath ? basename(sessionPath) : "<new>"} workspace=${workspace.path}`
+      );
       await agent.start({
         workspacePath: workspace.path,
         ...(sessionPath ? { sessionPath } : {})
       });
+      diagMain(`agent.start done in ${Date.now() - tStart}ms`);
       await rememberActiveAgentSession();
       return { ok: true, agentId };
     } catch (error) {
@@ -1481,6 +1516,8 @@ function registerIpc(): void {
       if (typeof sessionPath !== "string" || !sessionPath) {
         return { ok: false, error: "Invalid session path." };
       }
+      const t0 = Date.now();
+      diagMain(`attach start ${basename(sessionPath)}`);
       const activeFile = activeAgent ? await liveSessionFile(activeAgent) : null;
       if (activeAgent && activeFile === sessionPath) {
         return { ok: true, agentId: agentIdOf(activeAgent), status: activeAgentStatus };
@@ -1489,8 +1526,12 @@ function registerIpc(): void {
         const file = await liveSessionFile(slot.agent);
         if (file !== sessionPath) continue;
         promoteBackgroundAgent(id);
+        diagMain(`attach hit background id=${id} in ${Date.now() - t0}ms`);
         return { ok: true, agentId: id, status: activeAgentStatus };
       }
+      diagMain(
+        `attach miss (no runtime) in ${Date.now() - t0}ms — renderer will start a fresh agent`
+      );
       return { ok: false, error: "No running agent for this chat." };
     }
   );

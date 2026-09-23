@@ -79,6 +79,7 @@ declare global {
       deleteAgentSession(sessionPath: string): Promise<ActionResult>;
       trayMenuAction(action: "show" | "quit" | "close"): Promise<void>;
       logRendererError(text: string): Promise<void>;
+      diagLog(line: string): Promise<void>;
       listLiveAgents(): Promise<
         Array<{ sessionPath?: string; workspacePath?: string; running: boolean }>
       >;

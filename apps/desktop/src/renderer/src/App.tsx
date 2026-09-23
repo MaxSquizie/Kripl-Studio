@@ -110,6 +110,20 @@ function writeStored(key: string, value: string): void {
   }
 }
 
+// Append one line to the shared diagnostics.log (userData) for tracing chat
+// open/resume paths and main-thread freezes. Fire-and-forget, size-capped.
+function diag(tag: string, detail?: unknown): void {
+  try {
+    const payload =
+      detail === undefined ? "" : ` ${JSON.stringify(detail).slice(0, 400)}`;
+    void window.kripl?.diagLog(
+      `[${new Date().toISOString()}] [renderer] ${tag}${payload}`
+    );
+  } catch {
+    // Diagnostics must never break the UI.
+  }
+}
+
 // Last agent binding per workspace, so switching back to a project restores
 // its chat (and reattaches if that agent is still running in the background).
 function loadSavedBindings(): Record<string, AgentBinding> {
@@ -582,6 +596,27 @@ export function App() {
   useEffect(() => {
     void refreshSessions();
   }, [workspace?.path]);
+
+  // Trace main-thread freezes: any task longer than 50ms is logged with its
+  // duration and the current DOM size, so a hang on chat open is visible in
+  // diagnostics.log instead of being a mystery.
+  useEffect(() => {
+    let observer: PerformanceObserver | null = null;
+    try {
+      observer = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          diag("longtask", {
+            ms: Math.round(entry.duration),
+            domNodes: document.querySelectorAll("*").length
+          });
+        }
+      });
+      observer.observe({ entryTypes: ["longtask"] });
+    } catch {
+      // Long-task tracing unsupported — diagnostics stay event-based.
+    }
+    return () => observer?.disconnect();
+  }, []);
 
   useEffect(() => {
     writeStored("kripl.localEndpoint", endpoint);
@@ -1129,6 +1164,8 @@ export function App() {
   }
 
   function hydrateSessionSnapshot(snapshot: AgentSessionSnapshot) {
+    diag("hydrate begin", { messages: snapshot.messageCount });
+    const t0 = Date.now();
     const restored: FeedItem[] = snapshot.messages
       .filter((message) => message.role !== "tool")
       .map((message) => {
@@ -1166,6 +1203,10 @@ export function App() {
         };
       });
 
+    diag("hydrate mapped", {
+      restored: restored.length,
+      ms: Date.now() - t0
+    });
     // Restore the last known generation speed onto the final answer bubble.
     const storedTokps = Number(readStored("kripl.tokps.last", ""));
     if (Number.isFinite(storedTokps) && storedTokps > 0) {
@@ -1182,6 +1223,10 @@ export function App() {
     setShowFullFeed(false);
     setLiveSteps(null);
     assistantMessageId.current = null;
+    diag("hydrate done", {
+      feed: restored.length,
+      totalMs: Date.now() - t0
+    });
 
     // Re-fetch stored image previews (best-effort; files may be gone).
     const pending = restored.filter(
@@ -1700,7 +1745,17 @@ export function App() {
   }
 
   async function startAgent(resumeSessionPath?: string) {
-    if (!workspace || !modelReady || !selectedModel) return;
+    if (!workspace || !modelReady || !selectedModel) {
+      diag("startAgent skipped", {
+        reason: !workspace
+          ? "no workspace"
+          : !modelReady
+            ? "model not ready"
+            : "no model selected",
+        sessionPath: resumeSessionPath ?? null
+      });
+      return;
+    }
     const seq = switchSeqRef.current;
 
     setAgentError("");
@@ -1713,6 +1768,8 @@ export function App() {
     setUsage(loadChatUsage(resumeSessionPath ?? NEW_CHAT_USAGE_SLOT));
     assistantMessageId.current = null;
 
+    const t0 = Date.now();
+    diag("startAgent ipc begin", { sessionPath: resumeSessionPath ?? null });
     const result = await window.kripl.startAgent({
       endpoint,
       modelId: selectedModel,
@@ -1720,6 +1777,11 @@ export function App() {
     });
     // A newer workspace switch won while we were starting — drop the result.
     if (switchSeqRef.current !== seq) return;
+    diag("startAgent ipc done", {
+      ok: result.ok,
+      error: result.error ?? null,
+      ms: Date.now() - t0
+    });
 
     if (!result.ok) {
       setAgentStatus("error");
@@ -1728,8 +1790,18 @@ export function App() {
       return;
     }
 
-    const snapshot = await window.kripl.getAgentSessionSnapshot().catch(() => null);
+    const tSnap = Date.now();
+    const snapshot = await window.kripl
+      .getAgentSessionSnapshot()
+      .catch((error) => {
+        diag("startAgent snapshot failed", { error: String(error) });
+        return null;
+      });
     if (snapshot) {
+      diag("startAgent snapshot fetched", {
+        messages: snapshot.messageCount,
+        ms: Date.now() - tSnap
+      });
       hydrateSessionSnapshot(snapshot);
     }
 
@@ -1751,11 +1823,29 @@ export function App() {
    * rebind without restarting; otherwise start it fresh.
    */
   async function resumeSession(sessionPath: string): Promise<void> {
-    if (!workspace || !modelReady || !selectedModel) return;
+    if (!workspace || !modelReady || !selectedModel) {
+      diag("resumeSession skipped", {
+        reason: !workspace
+          ? "no workspace"
+          : !modelReady
+            ? "model not ready"
+            : "no model selected",
+        sessionPath
+      });
+      return;
+    }
     const seq = switchSeqRef.current;
+    const t0 = Date.now();
+    diag("resumeSession start", { sessionPath, feed: feed.length });
 
     const attached = await window.kripl.attachAgent(sessionPath);
     if (switchSeqRef.current !== seq) return;
+    diag("attach result", {
+      ok: attached.ok,
+      agentId: attached.agentId,
+      status: attached.status,
+      ms: Date.now() - t0
+    });
     if (attached.ok && typeof attached.agentId === "number") {
       setEditingMessageId(null);
       discardTurnActivity();
@@ -1763,8 +1853,16 @@ export function App() {
       nearBottomRef.current = true;
       setAwayFromBottom(false);
 
-      const snapshot = await window.kripl.getAgentSessionSnapshot().catch(() => null);
+      const tSnap = Date.now();
+      const snapshot = await window.kripl.getAgentSessionSnapshot().catch((error) => {
+        diag("snapshot failed", { error: String(error) });
+        return null;
+      });
       if (switchSeqRef.current !== seq) return;
+      diag("snapshot fetched", {
+        messages: snapshot?.messageCount ?? 0,
+        ms: Date.now() - tSnap
+      });
       if (snapshot) hydrateSessionSnapshot(snapshot);
       setUsage(loadChatUsage(sessionPath));
 
@@ -1784,9 +1882,14 @@ export function App() {
         }
       }
       void refreshSessions();
+      diag("resumeSession done (attached)", { ms: Date.now() - t0 });
       return;
     }
 
+    diag("resumeSession falling back to fresh agent.start", {
+      sessionPath,
+      ms: Date.now() - t0
+    });
     await startAgent(sessionPath);
   }
 

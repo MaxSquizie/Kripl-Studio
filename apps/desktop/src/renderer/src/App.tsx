@@ -131,6 +131,11 @@ function rememberAgentBinding(binding: AgentBinding): void {
   }
 }
 
+// How many feed items are mounted at once for long sessions. The full feed
+// stays in state (search/edit/regenerate still see everything); only the DOM
+// is windowed. Mounting thousands of markdown bubbles kills the renderer.
+const FEED_RENDER_WINDOW = 300;
+
 function buildMessageWithAttachments(text: string, files: AttachedFile[]): string {
   const usable = files.filter((file) => !file.error);
   if (usable.length === 0) return text;
@@ -460,6 +465,9 @@ export function App() {
   const [pendingMessages, setPendingMessages] = useState(0);
   // True while the user is scrolled away from the bottom (shows the pill).
   const [awayFromBottom, setAwayFromBottom] = useState(false);
+  // Huge sessions (thousands of messages) crash the renderer when every
+  // bubble is mounted at once; render a tail window by default.
+  const [showFullFeed, setShowFullFeed] = useState(false);
 
   // Transient top-right notifications (file saved, model probe, …).
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -953,6 +961,13 @@ export function App() {
   // limit, the ring shows "unknown" instead of a made-up number.
   const contextWindowLimit =
     contextWindowOverride ?? selectedModelInfo?.contextWindow;
+  const visibleFeed = useMemo(
+    () =>
+      showFullFeed || feed.length <= FEED_RENDER_WINDOW
+        ? feed
+        : feed.slice(feed.length - FEED_RENDER_WINDOW),
+    [feed, showFullFeed]
+  );
   const lastAssistantId = useMemo(() => {
     for (let index = feed.length - 1; index >= 0; index -= 1) {
       const item = feed[index];
@@ -1153,6 +1168,7 @@ export function App() {
     }
 
     setFeed(restored);
+    setShowFullFeed(false);
     setLiveSteps(null);
     assistantMessageId.current = null;
 
@@ -1309,6 +1325,7 @@ export function App() {
     setBinding(null);
     setAgentStatus("idle");
     setFeed([]);
+    setShowFullFeed(false);
     setLiveSteps(null);
     setInteraction(null);
     assistantMessageId.current = null;
@@ -1678,6 +1695,7 @@ export function App() {
     setAgentError("");
     setAgentStatus("starting");
     setFeed([]);
+    setShowFullFeed(false);
     setLiveSteps(null);
     // Keep the last known context usage visible until live events replace it.
     // Restore this chat's last known context usage until live events arrive.
@@ -1855,6 +1873,7 @@ export function App() {
       runStartedAtRef.current = null;
       setAgentStatus("idle");
       setFeed([]);
+      setShowFullFeed(false);
     }
     pushToast("success", "Чат удалён.");
     void refreshSessions();
@@ -2336,7 +2355,15 @@ export function App() {
               </section>
             ) : (
               <div className="transcript">
-                {feed.map((item) =>
+                {visibleFeed !== feed && (
+                  <div className="feed-window-note">
+                    Показаны последние {FEED_RENDER_WINDOW} из {feed.length} сообщений
+                    <button type="button" onClick={() => setShowFullFeed(true)}>
+                      Показать все
+                    </button>
+                  </div>
+                )}
+                {visibleFeed.map((item) =>
                   item.kind === "message" ? (
                     <article key={item.id} className={`chat-message ${item.role}`}>
                       <div className="message-role">

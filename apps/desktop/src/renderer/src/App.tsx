@@ -1060,6 +1060,16 @@ export function App() {
   useEffect(() => {
     if (!workspace || !modelReady) return;
     if (autoStartedWorkspaces.current.has(workspace.path)) return;
+    // Crash-reload backstop: the in-memory set above resets on every renderer
+    // reload, so a fatal auto-resume would otherwise repeat forever. Remember
+    // when we last auto-started this workspace and skip it for 10 minutes.
+    const lastAutoStart = Number(
+      readStored(`kripl.autoStarted.${workspace.path}`, "0")
+    );
+    if (Date.now() - lastAutoStart < 10 * 60_000) {
+      autoStartedWorkspaces.current.add(workspace.path);
+      return;
+    }
     // Never auto-start over a live run or an existing binding for this
     // workspace: modelReady can re-evaluate mid-generation (e.g. after a
     // probe), and restarting here would clobber the active feed.
@@ -1079,6 +1089,7 @@ export function App() {
       return;
     }
     autoStartedWorkspaces.current.add(workspace.path);
+    writeStored(`kripl.autoStarted.${workspace.path}`, String(Date.now()));
     // Resume this project's last chat, or open a fresh session so the
     // composer is never left dead after a project switch.
     if (saved?.sessionPath) void resumeSession(saved.sessionPath);

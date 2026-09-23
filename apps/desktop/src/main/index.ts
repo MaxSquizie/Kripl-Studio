@@ -929,13 +929,25 @@ function createWindow(): BrowserWindow {
   });
 
   // A dead renderer leaves only the bare window background on screen (the
-  // blank dark window users see). Log why it died and bring the UI back.
+  // blank dark window users see). Log why it died and bring the UI back —
+  // unless we are in a crash loop, in which case reloading just re-triggers
+  // whatever killed us (e.g. auto-resuming a huge session) forever.
+  const recentCrashTimes: number[] = [];
   window.webContents.on("render-process-gone", (_event, details) => {
-    const entry = `\n=== ${new Date().toISOString()} ===\nRenderer process gone: reason=${details.reason} exitCode=${details.exitCode}\n`;
+    const now = Date.now();
+    recentCrashTimes.push(now);
+    while (
+      recentCrashTimes.length > 0 &&
+      now - recentCrashTimes[0]! > 90_000
+    ) {
+      recentCrashTimes.shift();
+    }
+    const storm = recentCrashTimes.length >= 3;
+    const entry = `\n=== ${new Date().toISOString()} ===\nRenderer process gone: reason=${details.reason} exitCode=${details.exitCode}${storm ? " (crash loop — auto-reload suppressed)" : ""}\n`;
     appendFile(join(app.getPath("userData"), "renderer-errors.log"), entry).catch(
       () => undefined
     );
-    if (isQuitting || window.isDestroyed()) return;
+    if (isQuitting || window.isDestroyed() || storm) return;
     void (
       process.env.ELECTRON_RENDERER_URL
         ? window.loadURL(process.env.ELECTRON_RENDERER_URL)

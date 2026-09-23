@@ -41,6 +41,19 @@ if (!window.kripl) {
     </main>
   `;
 } else {
+  // Minimized/occluded: pause CSS animations and the rail video. Keeps the
+  // compositor idle while hidden (the snake border animation used to coincide
+  // with renderer deaths in minimized windows).
+  const syncHiddenState = (): void => {
+    document.body.classList.toggle("app-hidden", document.hidden);
+    for (const video of document.querySelectorAll<HTMLVideoElement>("video")) {
+      if (document.hidden) video.pause();
+      else void video.play().catch(() => undefined);
+    }
+  };
+  document.addEventListener("visibilitychange", syncHiddenState);
+  syncHiddenState();
+
   // Capture errors that escape React (event handlers, IPC callbacks) so a
   // blank window in an installed build leaves a trace behind.
   window.addEventListener("error", (event) => {

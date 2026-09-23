@@ -928,6 +928,21 @@ function createWindow(): BrowserWindow {
     }
   });
 
+  // A dead renderer leaves only the bare window background on screen (the
+  // blank dark window users see). Log why it died and bring the UI back.
+  window.webContents.on("render-process-gone", (_event, details) => {
+    const entry = `\n=== ${new Date().toISOString()} ===\nRenderer process gone: reason=${details.reason} exitCode=${details.exitCode}\n`;
+    appendFile(join(app.getPath("userData"), "renderer-errors.log"), entry).catch(
+      () => undefined
+    );
+    if (isQuitting || window.isDestroyed()) return;
+    void (
+      process.env.ELECTRON_RENDERER_URL
+        ? window.loadURL(process.env.ELECTRON_RENDERER_URL)
+        : window.loadFile(join(currentDir, "../renderer/index.html"))
+    );
+  });
+
   if (process.env.ELECTRON_RENDERER_URL) {
     void window.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
@@ -1964,6 +1979,14 @@ void app.whenReady().then(async () => {
       initializeContextForwarding(nextWindow);
     }
   });
+});
+
+// GPU/zygote deaths blank the window without a render-process-gone event.
+app.on("child-process-gone", (_event, details) => {
+  const entry = `\n=== ${new Date().toISOString()} ===\nChild process gone: type=${details.type} reason=${details.reason} exitCode=${details.exitCode}\n`;
+  appendFile(join(app.getPath("userData"), "renderer-errors.log"), entry).catch(
+    () => undefined
+  );
 });
 
 app.on("before-quit", () => {

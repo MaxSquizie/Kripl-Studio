@@ -889,6 +889,13 @@ button {
 }
 
 /* Themed tray action menu (frameless transparent window). */
+/* Window minimized/occluded: idle the compositor. */
+.app-hidden *,
+.app-hidden *::before,
+.app-hidden *::after {
+  animation-play-state: paused !important;
+}
+
 /* Renderer crash screen (ErrorBoundary fallback). */
 .crash-screen {
   position: fixed;

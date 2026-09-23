@@ -1045,6 +1045,19 @@ export function App() {
   useEffect(() => {
     if (!workspace || !modelReady) return;
     if (autoStartedWorkspaces.current.has(workspace.path)) return;
+    // Never auto-start over a live run or an existing binding for this
+    // workspace: modelReady can re-evaluate mid-generation (e.g. after a
+    // probe), and restarting here would clobber the active feed.
+    const alreadyBound =
+      Boolean(binding) && binding?.workspacePath === workspace.path;
+    if (
+      alreadyBound ||
+      agentStatus === "running" ||
+      agentStatus === "stopping"
+    ) {
+      autoStartedWorkspaces.current.add(workspace.path);
+      return;
+    }
     const saved = loadSavedBindings()[workspace.path];
     // A stale server/model selection must not auto-start the wrong runtime.
     if (saved && (saved.endpoint !== endpoint || saved.modelId !== selectedModel)) {
@@ -1055,7 +1068,7 @@ export function App() {
     // composer is never left dead after a project switch.
     if (saved?.sessionPath) void resumeSession(saved.sessionPath);
     else void startAgent();
-  }, [workspace, modelReady]);
+  }, [workspace, modelReady, agentStatus, binding]);
 
   const dirtyEditorPaths = useMemo(() => {
     const dirty = new Set<string>();

@@ -11,6 +11,7 @@ const IPC = {
   desktopBootstrap: "kripl:desktop-bootstrap",
   openRecentProject: "kripl:open-recent-project",
   trayMenuAction: "kripl:tray-menu-action",
+  rendererError: "kripl:renderer-error",
   forgetRecentProject: "kripl:forget-recent-project",
   saveDesktopUi: "kripl:save-desktop-ui",
   saveRuntimeSettings: "kripl:save-runtime-settings",
@@ -209,6 +210,9 @@ const api = {
 
   trayMenuAction: (action: "show" | "quit" | "close") =>
     ipcRenderer.invoke(IPC.trayMenuAction, action) as Promise<void>,
+
+  logRendererError: (text: string) =>
+    ipcRenderer.invoke(IPC.rendererError, text) as Promise<void>,
 
   listLiveAgents: () =>
     ipcRenderer.invoke(

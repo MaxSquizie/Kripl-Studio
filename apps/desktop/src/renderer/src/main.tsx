@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { TrayMenu } from "./TrayMenu";
 import "./styles.css";
 import "./model-provider.css";
@@ -40,6 +41,18 @@ if (!window.kripl) {
     </main>
   `;
 } else {
+  // Capture errors that escape React (event handlers, IPC callbacks) so a
+  // blank window in an installed build leaves a trace behind.
+  window.addEventListener("error", (event) => {
+    void window.kripl?.logRendererError(
+      `Uncaught error: ${event.message} @${event.filename}:${event.lineno}\n${event.error?.stack ?? ""}`
+    );
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event.reason instanceof Error ? event.reason.stack ?? event.reason.message : String(event.reason);
+    void window.kripl?.logRendererError(`Unhandled rejection: ${reason}`);
+  });
+
   // The tray action menu runs in its own tiny frameless window.
   const isTrayMenu = window.location.search.includes("tray-menu=1");
   if (isTrayMenu) {
@@ -50,6 +63,8 @@ if (!window.kripl) {
   }
 
   createRoot(root).render(
-    <StrictMode>{isTrayMenu ? <TrayMenu /> : <App />}</StrictMode>
+    <ErrorBoundary>
+      <StrictMode>{isTrayMenu ? <TrayMenu /> : <App />}</StrictMode>
+    </ErrorBoundary>
   );
 }

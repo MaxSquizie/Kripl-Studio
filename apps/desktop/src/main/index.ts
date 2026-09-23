@@ -12,7 +12,7 @@ import { PtyTerminalRuntime } from "@kripl/terminal";
 import { LocalWorkspaceRuntime } from "@kripl/workspace";
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, screen, Tray } from "electron";
 import { autoUpdater } from "electron-updater";
-import { copyFile, mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { appendFile, copyFile, mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserRuntime } from "./browser-runtime.js";
@@ -26,6 +26,7 @@ const IPC = {
   desktopBootstrap: "kripl:desktop-bootstrap",
   openRecentProject: "kripl:open-recent-project",
   trayMenuAction: "kripl:tray-menu-action",
+  rendererError: "kripl:renderer-error",
   forgetRecentProject: "kripl:forget-recent-project",
   saveDesktopUi: "kripl:save-desktop-ui",
   saveRuntimeSettings: "kripl:save-runtime-settings",
@@ -970,6 +971,15 @@ function registerIpc(): void {
     }
     const win = trayMenuWindow;
     if (win && !win.isDestroyed()) win.close();
+  });
+
+  // Renderer crash trace for installed builds (see ErrorBoundary / main.tsx).
+  ipcMain.handle(IPC.rendererError, (_event, text: unknown): void => {
+    if (typeof text !== "string" || !text.trim()) return;
+    const entry = `\n=== ${new Date().toISOString()} ===\n${text.slice(0, 20_000)}\n`;
+    appendFile(join(app.getPath("userData"), "renderer-errors.log"), entry).catch(
+      () => undefined
+    );
   });
 
   ipcMain.handle(IPC.appInfo, () => {

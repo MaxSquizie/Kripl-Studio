@@ -603,6 +603,13 @@ export function App() {
     void refreshSessions();
   }, [workspace?.path]);
 
+  // Mark renderer (re)mounts: any gap before this line in diagnostics.log
+  // means the previous renderer process died and main reloaded it.
+  useEffect(() => {
+    diag("app mounted", { workspace: workspace?.path ?? null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Trace main-thread freezes: any task longer than 50ms is logged with its
   // duration and the current DOM size, so a hang on chat open is visible in
   // diagnostics.log instead of being a mystery.
@@ -755,6 +762,7 @@ export function App() {
         return;
       }
       if (event.type === "agent.status") {
+        diag("agentStatus", { status: event.status, agentId: event.agentId });
         setAgentStatus(event.status);
         if (event.status === "running" && runStartedAtRef.current === null) {
           runStartedAtRef.current = Date.now();
@@ -1108,6 +1116,10 @@ export function App() {
       readStored(`kripl.autoStarted.${workspace.path}`, "0")
     );
     if (Date.now() - lastAutoStart < 10 * 60_000) {
+      diag("autoStart skipped", {
+        reason: "guard",
+        remainingMs: 10 * 60_000 - (Date.now() - lastAutoStart)
+      });
       autoStartedWorkspaces.current.add(workspace.path);
       return;
     }
@@ -1121,18 +1133,23 @@ export function App() {
       agentStatus === "running" ||
       agentStatus === "stopping"
     ) {
+      diag("autoStart skipped", {
+        reason: alreadyBound ? "already bound" : `agent ${agentStatus}`
+      });
       autoStartedWorkspaces.current.add(workspace.path);
       return;
     }
     const saved = loadSavedBindings()[workspace.path];
     // A stale server/model selection must not auto-start the wrong runtime.
     if (saved && (saved.endpoint !== endpoint || saved.modelId !== selectedModel)) {
+      diag("autoStart skipped", { reason: "model mismatch" });
       return;
     }
     autoStartedWorkspaces.current.add(workspace.path);
     writeStored(`kripl.autoStarted.${workspace.path}`, String(Date.now()));
     // Resume this project's last chat, or open a fresh session so the
     // composer is never left dead after a project switch.
+    diag("autoStart firing", { sessionPath: saved?.sessionPath ?? null });
     if (saved?.sessionPath) void resumeSession(saved.sessionPath);
     else void startAgent();
   }, [workspace, modelReady, agentStatus, binding]);

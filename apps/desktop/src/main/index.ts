@@ -953,6 +953,9 @@ function createWindow(): BrowserWindow {
       recentCrashTimes.shift();
     }
     const storm = recentCrashTimes.length >= 3;
+    diagMain(
+      `RENDERER GONE reason=${details.reason} exitCode=${details.exitCode}${storm ? " (crash loop — auto-reload suppressed)" : ""}`
+    );
     const entry = `\n=== ${new Date().toISOString()} ===\nRenderer process gone: reason=${details.reason} exitCode=${details.exitCode}${storm ? " (crash loop — auto-reload suppressed)" : ""}\n`;
     appendFile(join(app.getPath("userData"), "renderer-errors.log"), entry).catch(
       () => undefined

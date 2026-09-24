@@ -10,7 +10,7 @@ import {
 } from "@kripl/pi-adapter";
 import { PtyTerminalRuntime } from "@kripl/terminal";
 import { LocalWorkspaceRuntime } from "@kripl/workspace";
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, screen, Tray } from "electron";
+import { app, BrowserWindow, crashReporter, dialog, ipcMain, nativeImage, screen, Tray } from "electron";
 import { autoUpdater } from "electron-updater";
 import { appendFile, copyFile, mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -19,6 +19,17 @@ import { BrowserRuntime } from "./browser-runtime.js";
 import { ToolBridgeServer } from "./tool-bridge.js";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
+
+// KRIPL_USER_DATA lets developers run an isolated instance (own profile,
+// own Pi sessions) next to the installed one. Must be set before any
+// userData access, including the crash reporter below.
+if (process.env.KRIPL_USER_DATA && isAbsolute(process.env.KRIPL_USER_DATA)) {
+  app.setPath("userData", process.env.KRIPL_USER_DATA);
+}
+
+// Write minidumps for renderer/GPU crashes to <userData>/Crashpad so a
+// field crash can be analyzed instead of guessed at. No upload: local only.
+crashReporter.start({ uploadToServer: false, productName: "Kripl Studio" });
 
 // Append one diagnostics line from the main process (agent lifecycle, IPC
 // timings). Renderer lines arrive via kripl:diag-log into the same file.

@@ -464,6 +464,12 @@ export function App() {
   // Bumped on every workspace hydration; in-flight async flows (resume /
   // start / hydrate) abort their state writes when a newer switch wins.
   const switchSeqRef = useRef(0);
+  // In-flight resumeSession promises per session path: a double click (or the
+  // auto-start effect racing a manual click) must not start two agents for
+  // the same chat — the second call joins the first instead.
+  const resumingPathsRef = useRef(
+    new Map<string, { promise: Promise<void>; at: number }>()
+  );
 
   // The input grows with the text up to ~3x its base height, then scrolls.
   useEffect(() => {
@@ -1822,7 +1828,20 @@ export function App() {
    * Switch to a saved chat. If its agent is still running in the background,
    * rebind without restarting; otherwise start it fresh.
    */
-  async function resumeSession(sessionPath: string): Promise<void> {
+  function resumeSession(sessionPath: string): Promise<void> {
+    const inFlight = resumingPathsRef.current.get(sessionPath);
+    if (inFlight && Date.now() - inFlight.at < 15_000) {
+      diag("resumeSession deduped (already opening)", { sessionPath });
+      return inFlight.promise;
+    }
+    const run = doResumeSession(sessionPath).finally(() => {
+      resumingPathsRef.current.delete(sessionPath);
+    });
+    resumingPathsRef.current.set(sessionPath, { promise: run, at: Date.now() });
+    return run;
+  }
+
+  async function doResumeSession(sessionPath: string): Promise<void> {
     if (!workspace || !modelReady || !selectedModel) {
       diag("resumeSession skipped", {
         reason: !workspace

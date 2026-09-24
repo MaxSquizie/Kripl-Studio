@@ -1520,6 +1520,7 @@ function registerIpc(): void {
       diagMain(`attach start ${basename(sessionPath)}`);
       const activeFile = activeAgent ? await liveSessionFile(activeAgent) : null;
       if (activeAgent && activeFile === sessionPath) {
+        diagMain(`attach hit active in ${Date.now() - t0}ms`);
         return { ok: true, agentId: agentIdOf(activeAgent), status: activeAgentStatus };
       }
       for (const [id, slot] of [...backgroundAgents.entries()]) {

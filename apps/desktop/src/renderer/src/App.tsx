@@ -148,7 +148,12 @@ function rememberAgentBinding(binding: AgentBinding): void {
 // How many feed items are mounted at once for long sessions. The full feed
 // stays in state (search/edit/regenerate still see everything); only the DOM
 // is windowed. Mounting thousands of markdown bubbles kills the renderer.
-const FEED_RENDER_WINDOW = 300;
+/**
+ * The transcript renders in pages of this many messages. Only the newest page
+ * is mounted by default; older pages are loaded on demand (one page per click)
+ * so huge sessions do not freeze the renderer.
+ */
+const FEED_PAGE_SIZE = 150;
 
 function buildMessageWithAttachments(text: string, files: AttachedFile[]): string {
   const usable = files.filter((file) => !file.error);
@@ -487,7 +492,8 @@ export function App() {
   const [awayFromBottom, setAwayFromBottom] = useState(false);
   // Huge sessions (thousands of messages) crash the renderer when every
   // bubble is mounted at once; render a tail window by default.
-  const [showFullFeed, setShowFullFeed] = useState(false);
+  /** How many older messages are currently hidden above the visible window. */
+  const [feedHidden, setFeedHidden] = useState(0);
 
   // Transient top-right notifications (file saved, model probe, …).
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -1010,13 +1016,12 @@ export function App() {
   // limit, the ring shows "unknown" instead of a made-up number.
   const contextWindowLimit =
     contextWindowOverride ?? selectedModelInfo?.contextWindow;
-  const visibleFeed = useMemo(
-    () =>
-      showFullFeed || feed.length <= FEED_RENDER_WINDOW
-        ? feed
-        : feed.slice(feed.length - FEED_RENDER_WINDOW),
-    [feed, showFullFeed]
-  );
+  const visibleFeed = useMemo(() => {
+    // Never hide more than everything except the newest page; if messages get
+    // removed (regenerate / session switch) the window widens automatically.
+    const hidden = Math.min(feedHidden, Math.max(0, feed.length - FEED_PAGE_SIZE));
+    return hidden === 0 ? feed : feed.slice(hidden);
+  }, [feed, feedHidden]);
   const lastAssistantId = useMemo(() => {
     for (let index = feed.length - 1; index >= 0; index -= 1) {
       const item = feed[index];
@@ -1243,7 +1248,8 @@ export function App() {
     }
 
     setFeed(restored);
-    setShowFullFeed(false);
+    // Large restored sessions start at the newest page; older ones load on demand.
+    setFeedHidden(Math.max(0, restored.length - FEED_PAGE_SIZE));
     setLiveSteps(null);
     assistantMessageId.current = null;
     diag("hydrate done", {
@@ -1404,7 +1410,7 @@ export function App() {
     setBinding(null);
     setAgentStatus("idle");
     setFeed([]);
-    setShowFullFeed(false);
+    setFeedHidden(0);
     setLiveSteps(null);
     setInteraction(null);
     assistantMessageId.current = null;
@@ -1784,7 +1790,7 @@ export function App() {
     setAgentError("");
     setAgentStatus("starting");
     setFeed([]);
-    setShowFullFeed(false);
+    setFeedHidden(0);
     setLiveSteps(null);
     // Keep the last known context usage visible until live events replace it.
     // Restore this chat's last known context usage until live events arrive.
@@ -2023,7 +2029,7 @@ export function App() {
       runStartedAtRef.current = null;
       setAgentStatus("idle");
       setFeed([]);
-      setShowFullFeed(false);
+      setFeedHidden(0);
     }
     pushToast("success", "Чат удалён.");
     void refreshSessions();
@@ -2507,9 +2513,12 @@ export function App() {
               <div className="transcript">
                 {visibleFeed !== feed && (
                   <div className="feed-window-note">
-                    Показаны последние {FEED_RENDER_WINDOW} из {feed.length} сообщений
-                    <button type="button" onClick={() => setShowFullFeed(true)}>
-                      Показать все
+                    Показаны последние {visibleFeed.length} из {feed.length} сообщений
+                    <button
+                      type="button"
+                      onClick={() => setFeedHidden((current) => Math.max(0, current - FEED_PAGE_SIZE))}
+                    >
+                      Загрузить ещё {Math.min(FEED_PAGE_SIZE, feedHidden)}
                     </button>
                   </div>
                 )}

@@ -287,10 +287,13 @@ function renderBlocks(text: string): ReactNode[] {
     }
 
     // Paragraph: consecutive non-blank, non-special lines.
+    // A line that looks like a block start but was not handled above (e.g. a
+    // lone "|" tree-drawing line) must still be consumed here, otherwise the
+    // loop would re-read it forever and hang the renderer.
     const para: string[] = [];
     for (;;) {
       const next = lines[i];
-      if (next === undefined || next.trim() === "" || isBlockStart(next)) break;
+      if (next === undefined || next.trim() === "" || (para.length > 0 && isBlockStart(next))) break;
       para.push(next);
       i += 1;
     }

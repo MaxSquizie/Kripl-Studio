@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChatTranscript } from "./ChatTranscript";
 import { SettingsDialog } from "./SettingsDialog";
 import { createAgentEventBuffer } from "./agent-event-buffer";
+import { createAttachEventCollector } from "./attach-event-collector";
 import { toolPayloadPreview } from "./tool-payload-preview";
 import { useLatestCallback } from "./useLatestCallback";
 import type { FeedItem, MessageItem, ReasoningBlock, ReasoningStep, ToolItem } from "./chat-types";
@@ -1873,12 +1874,13 @@ export function App() {
     const t0 = Date.now();
     diag("resumeSession start", { sessionPath, feed: feed.length });
 
-    // Collect status from before attach begins: a background run can finish
-    // while attach or its snapshot is in flight, before the main feed is bound.
-    const statuses = new Map<number, Extract<AgentEvent, { type: "agent.status" }>>();
+    // Preserve control state while the feed is unbound. A background run can
+    // finish or ask for permission while attach or its snapshot is in flight.
+    // The snapshot owns transcript data; only the selected runtime's pending
+    // interaction and latest status/notification are restored after hydration.
+    const controls = createAttachEventCollector();
     const stopCollecting = window.kripl.onAgentEvent((event) => {
-      const sourceId = (event as AgentEvent & { agentId?: number }).agentId;
-      if (event.type === "agent.status" && sourceId !== undefined) statuses.set(sourceId, event);
+      controls.push(event);
     });
     try {
       const attached = await window.kripl.attachAgent(sessionPath);
@@ -1891,7 +1893,7 @@ export function App() {
       });
       if (attached.ok && typeof attached.agentId === "number") {
         const targetId = attached.agentId;
-        const latestStatus = () => statuses.get(targetId)?.status ?? attached.status ?? "ready";
+        const latestStatus = () => controls.forAgent(targetId).status?.status ?? attached.status ?? "ready";
         const statusBeforeSnapshot = latestStatus();
         const tSnap = Date.now();
         let snapshot = await window.kripl.getAgentSessionSnapshot();
@@ -1910,7 +1912,8 @@ export function App() {
         hydrateSessionSnapshot(snapshot);
         setUsage(loadChatUsage(sessionPath));
 
-        const status = latestStatus();
+        const pendingControls = controls.forAgent(targetId);
+        const status = pendingControls.status?.status ?? attached.status ?? "ready";
         reconcileTranscriptOnReadyRef.current = status === "running" || status === "stopping";
         const nextBinding: AgentBinding = {
           workspacePath: workspace.path,
@@ -1923,8 +1926,9 @@ export function App() {
         setBinding(nextBinding);
         rememberAgentBinding(nextBinding);
         setAgentStatus(status);
+        setInteraction(pendingControls.interaction ?? null);
+        setAgentError(pendingControls.errorText ?? (status === "error" ? "Pi agent failed." : ""));
         if (status === "running" || status === "stopping") runStartedAtRef.current = Date.now();
-        if (status === "error") setAgentError(statuses.get(targetId)?.message ?? "Pi agent failed.");
         void refreshSessions();
         diag("resumeSession done (attached)", { ms: Date.now() - t0 });
         return;

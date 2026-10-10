@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type {
   WorkspaceChange,
   WorkspaceDescriptor,
@@ -116,7 +117,7 @@ function TreeLevel({
   );
 }
 
-export function WorkspaceSidebar({
+export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   workspace,
   entries,
   expanded,
@@ -268,4 +269,4 @@ export function WorkspaceSidebar({
       </section>
     </aside>
   );
-}
+});

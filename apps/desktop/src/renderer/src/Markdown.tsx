@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
+import { tokenizeInline } from "./inline-markdown";
 
 /**
  * Lightweight dependency-free markdown renderer for chat messages.
@@ -8,63 +9,38 @@ import { useState } from "react";
  * GFM pipe tables.
  */
 
-const INLINE_RE =
-  /(\*\*[^*\n]+\*\*)|(`+[^`\n]+`+)|(~~[^~\n]+~~)|(\*[^*\n]+\*)|(\[[^\]\n]+\]\([^)\s]+\))/g;
-
-function isSafeUrl(url: string): boolean {
-  return /^https?:\/\//i.test(url);
-}
-
 function renderInline(text: string, depth = 0): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  let last = 0;
-  let key = 0;
-  INLINE_RE.lastIndex = 0;
-  for (const match of text.matchAll(INLINE_RE)) {
-    const index = match.index ?? 0;
-    if (index > last) nodes.push(text.slice(last, index));
-    const token = match[0]!;
-    const k = `i${key++}`;
-    if (match[1]) {
-      nodes.push(
-        <strong key={k}>
-          {depth < 2 ? renderInline(token.slice(2, -2), depth + 1) : token.slice(2, -2)}
-        </strong>,
-      );
-    } else if (match[2]) {
-      // Strip exactly the opening run of backticks (and the matching closing
-      // run) so ``double`` and `/* comment */` spans keep their content.
-      const lead = /^`+/.exec(token)?.[0].length ?? 1;
-      const trail = /`+$/.exec(token)?.[0].length ?? 1;
-      const strip = Math.min(lead, trail);
-      nodes.push(<code key={k}>{token.slice(lead, token.length - strip)}</code>);
-    } else if (match[3]) {
-      nodes.push(<del key={k}>{token.slice(2, -2)}</del>);
-    } else if (match[4]) {
-      nodes.push(<em key={k}>{token.slice(1, -1)}</em>);
-    } else if (match[5]) {
-      const m = /\[([^\]]+)\]\(([^)\s]+)\)/.exec(token);
-      const label = m?.[1];
-      const url = m?.[2];
-      if (label && url && isSafeUrl(url)) {
-        nodes.push(
-          <a key={k} href={url} target="_blank" rel="noreferrer">
-            {label}
-          </a>,
-        );
-      } else {
-        nodes.push(token);
-      }
+  return tokenizeInline(text).map((token, key) => {
+    switch (token.kind) {
+      case "text": return token.text;
+      case "strong": return <strong key={key}>{depth < 2 ? renderInline(token.text, depth + 1) : token.text}</strong>;
+      case "code": return <code key={key}>{token.text}</code>;
+      case "del": return <del key={key}>{token.text}</del>;
+      case "em": return <em key={key}>{token.text}</em>;
+      case "link": return <a key={key} href={token.href} target="_blank" rel="noreferrer">{token.text}</a>;
     }
-    last = index + token.length;
-  }
-  if (last < text.length) nodes.push(text.slice(last));
-  return nodes;
+  });
 }
+
+// A growing answer still revisits its block boundaries, but completed inline
+// blocks do not need tokenizing / rebuilding on each streamed update.
+const InlineMarkdown = memo(function InlineMarkdown({ text }: { text: string }) {
+  return renderInline(text);
+});
 
 /** Small copy-to-clipboard button with a brief “copied” confirmation. */
-export function CopyIconButton({ text, title }: { text: string; title?: string }) {
+export const CopyIconButton = memo(function CopyIconButton({ text, title }: { text: string; title?: string }) {
   const [copied, setCopied] = useState(false);
+  const timeoutRef = useRef<number | undefined>(undefined);
+  const mountedRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      window.clearTimeout(timeoutRef.current);
+    };
+  }, []);
 
   async function copy() {
     try {
@@ -72,8 +48,13 @@ export function CopyIconButton({ text, title }: { text: string; title?: string }
     } catch {
       return; // clipboard unavailable (e.g. non-secure context) — stay silent
     }
+    if (!mountedRef.current) return;
     setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
+    window.clearTimeout(timeoutRef.current);
+    timeoutRef.current = window.setTimeout(() => {
+      timeoutRef.current = undefined;
+      setCopied(false);
+    }, 1500);
   }
 
   return (
@@ -95,17 +76,17 @@ export function CopyIconButton({ text, title }: { text: string; title?: string }
       )}
     </button>
   );
-}
+});
 
 /** Fenced code block with a hover-revealed copy button. */
-function CodeBlock({ lang, code }: { lang?: string | undefined; code: string }) {
+const CodeBlock = memo(function CodeBlock({ lang, code }: { lang?: string | undefined; code: string }) {
   return (
     <div className="code-block">
       <pre>{lang ? <code className="lang">{code}</code> : <code>{code}</code>}</pre>
       <CopyIconButton text={code} title="Скопировать код" />
     </div>
   );
-}
+});
 
 function isListMarker(line: string): "ul" | "ol" | null {
   if (/^\s*[-*]\s+/.test(line)) return "ul";
@@ -133,7 +114,8 @@ function isTableSeparator(line: string | undefined): boolean {
   if (line === undefined) return false;
   const trimmed = line.trim();
   if (!trimmed.includes("-") || !trimmed.includes("|")) return false;
-  return /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/.test(trimmed);
+  const cells = splitTableRow(trimmed);
+  return cells.length > 1 && cells.every((cell) => /^:?-+:?$/.test(cell));
 }
 
 function splitTableRow(line: string): string[] {
@@ -176,7 +158,7 @@ function renderBlocks(text: string): ReactNode[] {
     const heading = /^(#{1,3})\s+(.*)$/.exec(line);
     if (heading) {
       const level = heading[1]!.length;
-      const content = renderInline(heading[2] ?? "");
+      const content = <InlineMarkdown text={heading[2] ?? ""} />;
       blocks.push(
         level === 1 ? (
           <h1 key={`b${key++}`}>{content}</h1>
@@ -211,13 +193,13 @@ function renderBlocks(text: string): ReactNode[] {
         marker === "ul" ? (
           <ul key={`b${key++}`}>
             {items.map((item, n) => (
-              <li key={n}>{renderInline(item)}</li>
+              <li key={n}><InlineMarkdown text={item} /></li>
             ))}
           </ul>
         ) : (
           <ol key={`b${key++}`}>
             {items.map((item, n) => (
-              <li key={n}>{renderInline(item)}</li>
+              <li key={n}><InlineMarkdown text={item} /></li>
             ))}
           </ol>
         ),
@@ -236,7 +218,7 @@ function renderBlocks(text: string): ReactNode[] {
       }
       blocks.push(
         <blockquote key={`b${key++}`}>
-          <p>{renderInline(quoted.join("\n"))}</p>
+          <p><InlineMarkdown text={quoted.join("\n")} /></p>
         </blockquote>,
       );
       continue;
@@ -259,7 +241,7 @@ function renderBlocks(text: string): ReactNode[] {
             <thead>
               <tr>
                 {header.map((cell, n) => (
-                  <th key={n}>{renderInline(cell)}</th>
+                  <th key={n}><InlineMarkdown text={cell} /></th>
                 ))}
               </tr>
             </thead>
@@ -268,7 +250,7 @@ function renderBlocks(text: string): ReactNode[] {
                 {rows.map((row, r) => (
                   <tr key={r}>
                     {header.map((_cell, c) => (
-                      <td key={c}>{renderInline(row[c] ?? "")}</td>
+                      <td key={c}><InlineMarkdown text={row[c] ?? ""} /></td>
                     ))}
                   </tr>
                 ))}
@@ -297,13 +279,13 @@ function renderBlocks(text: string): ReactNode[] {
       para.push(next);
       i += 1;
     }
-    blocks.push(<p key={`b${key++}`}>{renderInline(para.join("\n"))}</p>);
+    blocks.push(<p key={`b${key++}`}><InlineMarkdown text={para.join("\n")} /></p>);
   }
 
   return blocks;
 }
 
-export function Markdown({ text }: { text: string }) {
+export const Markdown = memo(function Markdown({ text }: { text: string }) {
   if (!text.trim()) return null;
   return <div className="markdown">{renderBlocks(text)}</div>;
-}
+});

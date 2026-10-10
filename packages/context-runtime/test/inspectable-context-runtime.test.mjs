@@ -104,6 +104,47 @@ test("memory observes semantic events but not token deltas or status noise", asy
   );
 });
 
+test("tool progress does not rebroadcast the journal or displace lifecycle events", async () => {
+  const memory = new FakeMemory();
+  const runtime = new InspectableContextRuntime({ memory, maxEvents: 10 });
+  await runtime.initialize();
+  let broadcasts = 0;
+  const unsubscribe = runtime.subscribe(() => broadcasts += 1);
+
+  await runtime.record({ type: "agent.tool", phase: "started", callId: "tool-1", name: "bash" });
+  const beforeProgress = broadcasts;
+  let previews = 0;
+  const streamedPayload = { toJSON: () => { previews += 1; return "partial output"; } };
+  for (let chunk = 0; chunk < 200; chunk += 1) {
+    await runtime.record({
+      type: "agent.tool",
+      phase: "updated",
+      callId: "tool-1",
+      name: "bash",
+      payload: streamedPayload
+    });
+  }
+
+  assert.equal(broadcasts, beforeProgress);
+  assert.equal(previews, 0, "discarded progress must not serialize cumulative tool output");
+  assert.equal(runtime.snapshot().recentEvents.length, 1);
+
+  const result = { content: "Finished command output" };
+  await runtime.record({
+    type: "agent.tool",
+    phase: "completed",
+    callId: "tool-1",
+    name: "bash",
+    payload: result
+  });
+  assert.equal(broadcasts, beforeProgress + 1);
+  assert.deepEqual(runtime.snapshot().recentEvents.map(({ event }) => event.phase), ["started", "completed"]);
+  assert.equal(memory.observed.length, 1);
+  assert.equal(memory.observed[0].event.payload, result);
+  unsubscribe();
+  await runtime.dispose();
+});
+
 test("retrieval updates inspector memory state and records query/result events", async () => {
   const memory = new FakeMemory();
   const runtime = new InspectableContextRuntime({ memory });

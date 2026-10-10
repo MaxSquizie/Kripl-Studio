@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentStatus, AttachedFile, AgentInteractionResponse, AgentSessionSearchHit, AgentSessionSnapshot, AgentSessionSummary, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
+import type { AgentEvent, AgentStatus, AttachedFile, AgentInteractionResponse, AgentSessionInfo, AgentSessionSearchHit, AgentSessionSnapshot, AgentSessionSummary, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 const IPC = {
@@ -40,6 +40,7 @@ const IPC = {
   agentDeleteSession: "kripl:agent-delete-session",
   agentLiveSessions: "kripl:agent-live-sessions",
   agentLiveChanged: "kripl:agent-live-changed",
+  agentSessionInfo: "kripl:agent-session-info",
   agentSessionSnapshot: "kripl:agent-session-snapshot",
   agentExportSession: "kripl:agent-export-session",
   agentSearchSessions: "kripl:agent-search-sessions",
@@ -237,6 +238,9 @@ const api = {
       ipcRenderer.removeListener(IPC.agentLiveChanged, handler);
     };
   },
+
+  getAgentSessionInfo: () =>
+    ipcRenderer.invoke(IPC.agentSessionInfo) as Promise<AgentSessionInfo | null>,
 
   getAgentSessionSnapshot: () =>
     ipcRenderer.invoke(IPC.agentSessionSnapshot) as Promise<AgentSessionSnapshot | null>,

@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { TerminalSessionInfo } from "@kripl/core";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
@@ -10,7 +11,7 @@ interface TerminalPanelProps {
   onClose(): void;
 }
 
-export function TerminalPanel({
+export const TerminalPanel = memo(function TerminalPanel({
   visible,
   workspaceOpen,
   workspaceKey,
@@ -223,4 +224,4 @@ export function TerminalPanel({
       <div className="terminal-host" ref={hostRef} />
     </section>
   );
-}
+});

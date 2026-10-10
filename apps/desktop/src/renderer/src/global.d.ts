@@ -1,11 +1,6 @@
-import type { AgentEvent, AgentStatus, AttachedFile, AgentInteractionResponse, AgentSessionSearchHit, AgentSessionSnapshot, AgentSessionSummary, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
+import type { AgentEvent, AgentStatus, AttachedFile, AgentInteractionResponse, AgentSessionSearchHit, AgentSessionInfo, AgentSessionSnapshot, AgentSessionSummary, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
 
 declare module "*.png" {
-  const src: string;
-  export default src;
-}
-
-declare module "*.mp4" {
   const src: string;
   export default src;
 }
@@ -88,6 +83,7 @@ declare global {
           live: Array<{ sessionPath?: string; workspacePath?: string; running: boolean }>
         ) => void
       ): () => void;
+      getAgentSessionInfo(): Promise<AgentSessionInfo | null>;
       getAgentSessionSnapshot(): Promise<AgentSessionSnapshot | null>;
       exportAgentSession(sessionPath: string): Promise<AgentSessionSnapshot | null>;
       searchAgentSessions(query: string): Promise<AgentSessionSearchHit[]>;

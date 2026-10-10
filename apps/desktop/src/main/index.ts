@@ -1,4 +1,4 @@
-import type { AgentEvent, AttachedFile, AgentInteractionResponse, AgentSessionSearchHit, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
+import type { AgentEvent, AttachedFile, AgentInteractionResponse, AgentSessionInfo, AgentSessionSearchHit, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
 import { JsonDesktopStateStore } from "@kripl/app-state";
 import { InspectableContextRuntime } from "@kripl/context-runtime";
 import { LocalOpenAIProvider } from "@kripl/local-openai-provider";
@@ -73,6 +73,7 @@ const IPC = {
   agentDeleteSession: "kripl:agent-delete-session",
   agentLiveSessions: "kripl:agent-live-sessions",
   agentLiveChanged: "kripl:agent-live-changed",
+  agentSessionInfo: "kripl:agent-session-info",
   agentSessionSnapshot: "kripl:agent-session-snapshot",
   agentExportSession: "kripl:agent-export-session",
   agentSearchSessions: "kripl:agent-search-sessions",
@@ -146,8 +147,8 @@ function agentIdOf(agent: PiAgentRuntime): number {
 
 async function liveSessionFile(agent: PiAgentRuntime): Promise<string | null> {
   try {
-    const snapshot = await agent.getSessionSnapshot();
-    return snapshot.sessionFile ?? null;
+    const info = await agent.getSessionInfo();
+    return info.sessionFile ?? null;
   } catch {
     return null;
   }
@@ -365,9 +366,11 @@ async function saveSessionNames(names: Record<string, string>): Promise<void> {
   await writeFile(sessionNamesPath(), JSON.stringify({ version: 1, names }), "utf8");
 }
 
+let sessionCatalog: PiSessionCatalog | undefined;
+
 async function listWorkspaceSessions(workspacePath: string): Promise<AgentSessionSummary[]> {
   const [sessions, names] = await Promise.all([
-    new PiSessionCatalog(piSessionDir()).list(workspacePath),
+    (sessionCatalog ??= new PiSessionCatalog(piSessionDir())).list(workspacePath),
     loadSessionNames()
   ]);
   return sessions.map((session) => {
@@ -414,19 +417,24 @@ async function generateSessionTitle(
   }
 }
 
+const namingAgents = new WeakSet<PiAgentRuntime>();
+
 async function autoNameActiveSession(): Promise<void> {
   const agent = activeAgent;
   const model = activeAgentModel;
-  if (!agent || !model) return;
+  if (!agent || !model || namingAgents.has(agent)) return;
 
+  // Several tool turns can finish before the title request has returned.
+  namingAgents.add(agent);
   try {
-    const snapshot = await agent.getSessionSnapshot();
-    const sessionFile = snapshot.sessionFile;
+    const info = await agent.getSessionInfo();
+    const sessionFile = info.sessionFile;
     if (!sessionFile) return;
 
     const names = await loadSessionNames();
     if (names[pathKey(sessionFile)]) return; // already named (custom or auto)
 
+    const snapshot = await agent.getSessionSnapshot();
     const firstUser = snapshot.messages.find((message) => message.role === "user");
     const text = firstUser?.text ?? "";
     if (!text.trim()) return;
@@ -444,6 +452,8 @@ async function autoNameActiveSession(): Promise<void> {
     broadcastToWindow(IPC.agentSessionsChanged, undefined);
   } catch {
     // Auto-naming must never break the agent run.
+  } finally {
+    namingAgents.delete(agent);
   }
 }
 
@@ -453,11 +463,11 @@ async function rememberActiveAgentSession(): Promise<void> {
   if (!agent || !workspace) return;
 
   try {
-    const snapshot = await agent.getSessionSnapshot();
-    if (!snapshot.sessionFile) return;
-    const info = await stat(snapshot.sessionFile);
+    const session = await agent.getSessionInfo();
+    if (!session.sessionFile) return;
+    const info = await stat(session.sessionFile);
     if (!info.isFile()) return;
-    await requireDesktopStateStore().rememberSession(workspace.path, snapshot.sessionFile);
+    await requireDesktopStateStore().rememberSession(workspace.path, session.sessionFile);
   } catch {
     // Session persistence is best-effort and must not break agent execution.
   }
@@ -646,7 +656,11 @@ function forwardAgentEvent(
 ): void {
   void contextRuntime.record(event);
 
-  if (event.type === "agent.status") {
+  // Parked runtimes have their own status handler. Their events may be
+  // forwarded to the renderer, but must not change the foreground status.
+  const isActiveEvent = agentId === undefined ||
+    (activeAgent !== undefined && agentIds.get(activeAgent) === agentId);
+  if (event.type === "agent.status" && isActiveEvent) {
     const previous = activeAgentStatus;
     activeAgentStatus = event.status;
     if (event.status === "ready") {
@@ -1287,15 +1301,23 @@ function registerIpc(): void {
     return listWorkspaceSessions(workspace.path);
   });
 
+  ipcMain.handle(IPC.agentSessionInfo, async (): Promise<AgentSessionInfo | null> => {
+    const agent = activeAgent;
+    if (!agent) return null;
+    const info = await agent.getSessionInfo();
+    return activeAgent === agent ? info : null;
+  });
+
   ipcMain.handle(IPC.agentSessionSnapshot, async (): Promise<AgentSessionSnapshot | null> => {
-    if (!activeAgent) return null;
+    const agent = activeAgent;
+    if (!agent) return null;
     const t0 = Date.now();
     try {
-      const snapshot = await activeAgent.getSessionSnapshot();
+      const snapshot = await agent.getSessionSnapshot();
       diagMain(
         `snapshot done in ${Date.now() - t0}ms messages=${snapshot?.messageCount ?? 0}`
       );
-      return snapshot;
+      return activeAgent === agent ? snapshot : null;
     } catch (error) {
       diagMain(`snapshot failed after ${Date.now() - t0}ms: ${String(error)}`);
       throw error;
@@ -1978,8 +2000,8 @@ function registerIpc(): void {
         try {
           const agent = activeAgent;
           if (agent?.setSessionName) {
-            const snapshot = await agent.getSessionSnapshot();
-            if (snapshot.sessionFile && pathKey(snapshot.sessionFile) === key) {
+            const info = await agent.getSessionInfo();
+            if (info.sessionFile && pathKey(info.sessionFile) === key) {
               if (name) await agent.setSessionName(name);
             }
           }

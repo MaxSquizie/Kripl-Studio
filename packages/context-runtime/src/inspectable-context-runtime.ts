@@ -23,6 +23,9 @@ function isAgentEvent(event: RuntimeEvent): event is AgentEvent {
 
 function shouldRetainEvent(event: RuntimeEvent): boolean {
   if (event.type === "agent.raw") return false;
+  // Tools can stream cumulative output on every chunk. Keep lifecycle
+  // boundaries in the inspector; progress still goes through agent events.
+  if (event.type === "agent.tool" && event.phase === "updated") return false;
   if (
     event.type === "agent.stream" &&
     event.phase === "delta"

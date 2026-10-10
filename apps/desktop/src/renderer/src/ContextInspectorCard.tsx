@@ -3,7 +3,7 @@ import type {
   RuntimeEvent,
   RuntimeEventEnvelope
 } from "@kripl/core";
-import { useMemo, useState } from "react";
+import { memo, useId, useMemo, useState } from "react";
 
 function shortText(value: string, limit = 120): string {
   const compact = value.replace(/\s+/g, " ").trim();
@@ -104,7 +104,7 @@ function eventTime(envelope: RuntimeEventEnvelope): string {
   });
 }
 
-export function ContextInspectorCard({
+export const ContextInspectorCard = memo(function ContextInspectorCard({
   snapshot,
   onRetrieve
 }: {
@@ -114,10 +114,11 @@ export function ContextInspectorCard({
   const [query, setQuery] = useState("");
   const [retrieving, setRetrieving] = useState(false);
   const [error, setError] = useState("");
+  const queryId = useId();
 
   const recent = useMemo(
     () => snapshot?.recentEvents.slice(-18).reverse() ?? [],
-    [snapshot]
+    [snapshot?.recentEvents]
   );
 
   const health = snapshot?.memoryHealth;
@@ -159,10 +160,11 @@ export function ContextInspectorCard({
 
       {health?.message && <p className="settings-hint">{health.message}</p>}
 
-      <label className="context-query">
-        <span>Memory query</span>
+      <div className="context-query">
+        <label htmlFor={queryId}>Memory query</label>
         <div>
           <input
+            id={queryId}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => {
@@ -187,9 +189,9 @@ export function ContextInspectorCard({
             {retrieving ? "…" : "Find"}
           </button>
         </div>
-      </label>
+      </div>
 
-      {error && <p className="probe-result error">{error}</p>}
+      {error && <p className="probe-result error" role="alert">{error}</p>}
 
       {snapshot && snapshot.retrievedMemory.length > 0 && (
         <details className="context-section" open>
@@ -226,4 +228,4 @@ export function ContextInspectorCard({
       </details>
     </div>
   );
-}
+});

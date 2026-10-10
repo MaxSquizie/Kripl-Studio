@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { ReactNode } from "react";
 
 /**
- * A <details> element whose body animation replays on every open.
- * Chromium does not restart CSS animations when a closed <details> is
- * reopened (the content stays in the DOM), so the body is remounted via
- * a changing key each time the panel opens.
+ * Only mount the body while expanded. Besides replaying its entrance
+ * animation, this keeps closed reasoning / tool output out of React's render
+ * work and the DOM. A render callback also defers expensive body preparation.
  */
 export function CollapsibleDetails({
   className,
@@ -17,33 +16,20 @@ export function CollapsibleDetails({
   className: string;
   summary: ReactNode;
   bodyClassName?: string | undefined;
-  /** Start expanded. Native toggling afterwards is not re-synced by React. */
+  /** Initial state only; subsequent toggles belong to the user. */
   defaultOpen?: boolean;
-  children: ReactNode;
+  children: ReactNode | (() => ReactNode);
 }) {
-  const [openTick, setOpenTick] = useState(0);
-  const detailsRef = useRef<HTMLDetailsElement | null>(null);
-
-  useEffect(() => {
-    const element = detailsRef.current;
-    if (!element) return;
-    const onToggle = (): void => {
-      if (element.open) setOpenTick((tick) => tick + 1);
-    };
-    element.addEventListener("toggle", onToggle);
-    return () => element.removeEventListener("toggle", onToggle);
-  }, []);
+  const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <details ref={detailsRef} className={className} open={defaultOpen || undefined}>
+    <details
+      className={className}
+      open={open || undefined}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
       <summary>{summary}</summary>
-      {bodyClassName ? (
-        <div key={openTick} className={bodyClassName}>
-          {children}
-        </div>
-      ) : (
-        <div key={openTick}>{children}</div>
-      )}
+      {open && <div className={bodyClassName}>{typeof children === "function" ? children() : children}</div>}
     </details>
   );
 }

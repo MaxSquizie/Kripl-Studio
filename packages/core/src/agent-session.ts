@@ -26,11 +26,15 @@ export interface AgentSessionMessage {
   isError?: boolean;
 }
 
-export interface AgentSessionSnapshot {
+/** Session metadata without loading the conversation transcript. */
+export interface AgentSessionInfo {
   sessionFile?: string;
   sessionId: string;
   sessionName?: string;
   messageCount: number;
+}
+
+export interface AgentSessionSnapshot extends AgentSessionInfo {
   messages: AgentSessionMessage[];
 }
 

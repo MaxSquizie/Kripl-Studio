@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { WorkspaceDocumentView, WorkspaceView } from "./WorkspaceContent";
 
 function basename(path: string): string {
@@ -27,7 +28,7 @@ function isActive(activeView: WorkspaceView, tab: WorkspaceDocumentView): boolea
   return activeView.type !== "agent" && workspaceViewKey(activeView) === workspaceViewKey(tab);
 }
 
-export function WorkspaceTabs({
+export const WorkspaceTabs = memo(function WorkspaceTabs({
   tabs,
   activeView,
   dirtyFiles,
@@ -90,4 +91,4 @@ export function WorkspaceTabs({
       })}
     </div>
   );
-}
+});

@@ -1,20 +1,20 @@
 import type { AgentEvent, AttachedFile, AgentInteractionRequest, AgentInteractionResponse, AgentSessionSearchHit, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, ContextInspectorSnapshot, DesktopRuntimeSettings, DesktopUiState, RecentProject, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceEntry, WorkspaceFilePreview, WorkspaceGitStatus } from "@kripl/core";
 import { cleanAssistantToolText } from "@kripl/core";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ChatTranscript } from "./ChatTranscript";
+import { SettingsDialog } from "./SettingsDialog";
+import { createAgentEventBuffer } from "./agent-event-buffer";
+import { toolPayloadPreview } from "./tool-payload-preview";
+import { useLatestCallback } from "./useLatestCallback";
+import type { FeedItem, MessageItem, ReasoningBlock, ReasoningStep, ToolItem } from "./chat-types";
 import type { ClipboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import { WorkspaceContent, activeWorkspacePath, type WorkspaceDocumentView, type WorkspaceEditorRevealTarget, type WorkspaceView } from "./WorkspaceContent";
 import { WorkspaceTabs, upsertWorkspaceTab, workspaceViewKey } from "./WorkspaceTabs";
 import { TerminalPanel } from "./TerminalPanel";
-import { ContextInspectorCard } from "./ContextInspectorCard";
 import kriplIcon from "./assets/kripl-icon.png";
-import { GitStatusCard } from "./GitStatusCard";
 import { CollapsibleDetails } from "./CollapsibleDetails";
-import { AgentPermissionsCard } from "./AgentPermissionsCard";
-import { ModelTuningCard } from "./ModelTuningCard";
 import { RecentProjectsCard } from "./RecentProjectsCard";
-import kriplCodingLoop from "./assets/kripl-coding.mp4";
-import { Markdown, CopyIconButton } from "./Markdown";
 import { WorkspaceSearchPalette, type WorkspaceSearchMode } from "./WorkspaceSearchPalette";
 import { CommandPalette, type CommandItem } from "./CommandPalette";
 import { ContextMenu, type ContextMenuState } from "./ContextMenu";
@@ -225,46 +225,6 @@ interface LocalModel {
   contextWindow?: number;
 }
 
-type MessageRole = "user" | "assistant" | "system";
-
-/** One ordered step of the agent's work: a reasoning text or a tool call. */
-type ReasoningStep =
-  | { kind: "thinking"; text: string }
-  | { kind: "tool"; tool: ToolItem };
-
-/** Collapsed activity folded into an answer bubble, in the order it happened:
- *  reasoning text → tool call → reasoning text → … */
-interface ReasoningBlock {
-  steps: ReasoningStep[];
-  /** Wall-clock time the agent spent on this activity, if measured. */
-  durationMs?: number;
-}
-
-interface MessageItem {
-  kind: "message";
-  id: string;
-  role: MessageRole;
-  text: string;
-  /** Data URLs of attached images, rendered inline in the chat. */
-  images?: string[];
-  /** Stored paths awaiting preview load when hydrating an old session. */
-  imagePaths?: string[];
-  /** Non-image attachments (name + stored path), shown as chips. */
-  files?: { name: string; path: string }[];
-  reasoning?: ReasoningBlock;
-  /** Generation speed restored from storage after an app restart. */
-  tokps?: number;
-}
-
-interface ToolItem {
-  kind: "tool";
-  callId: string;
-  name: string;
-  phase: "started" | "updated" | "completed" | "failed";
-  payload?: unknown;
-}
-
-type FeedItem = MessageItem | ToolItem;
 
 interface AgentBinding {
   workspacePath: string;
@@ -344,25 +304,6 @@ function formatRunElapsed(totalSeconds: number): string {
   return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
 }
 
-/** Stopwatch for the collapsed reasoning block: “3м 12с” or just “45с”. */
-function formatReasoningDuration(ms: number): string {
-  const totalSeconds = Math.round(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return minutes > 0 ? `${minutes}м ${seconds}с` : `${seconds}с`;
-}
-
-function payloadPreview(payload: unknown): string {
-  if (payload === undefined) return "";
-  try {
-    const serialized = JSON.stringify(payload, null, 2);
-    if (typeof serialized !== "string") return String(payload);
-    return serialized.length > 1800 ? `${serialized.slice(0, 1800)}\n…` : serialized;
-  } catch {
-    return String(payload);
-  }
-}
-
 export function App() {
   const [workspace, setWorkspace] = useState<WorkspaceDescriptor | null>(null);
   const [workspaceEntries, setWorkspaceEntries] = useState<Record<string, WorkspaceEntry[]>>({});
@@ -392,7 +333,7 @@ export function App() {
   const bindingAgentIdRef = useRef<number | null>(null);
   // Storage key for this chat's persisted context usage.
   const chatUsageKeyRef = useRef<string>(NEW_CHAT_USAGE_SLOT);
-  useEffect(() => {
+  useLayoutEffect(() => {
     bindingAgentIdRef.current = binding?.agentId ?? null;
     chatUsageKeyRef.current = binding?.sessionPath || NEW_CHAT_USAGE_SLOT;
   }, [binding]);
@@ -400,7 +341,11 @@ export function App() {
   const [renamingPath, setRenamingPath] = useState<string | null>(null);
   // User message being edited for a resend (replaces it and everything after).
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState("");
+  // Preserve one draft across transcript unmounts without rendering App on each key.
+  const editDraftRef = useRef<{ id: string; text: string } | null>(null);
+  useLayoutEffect(() => {
+    if (editDraftRef.current?.id !== editingMessageId) editDraftRef.current = null;
+  }, [editingMessageId]);
   const [renameValue, setRenameValue] = useState("");
   const [attachments, setAttachments] = useState<AttachedFile[]>([]);
   // path -> data URL preview (images and PDFs) for the composer chips
@@ -429,6 +374,9 @@ export function App() {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
   });
   const [feed, setFeed] = useState<FeedItem[]>([]);
+  const streamBufferRef = useRef<ReturnType<typeof createAgentEventBuffer> | null>(null);
+  // A run attached midway may have emitted text before this renderer subscribed.
+  const reconcileTranscriptOnReadyRef = useRef(false);
   // Live reasoning timeline (text + tool calls in order) shown while the agent
   // is still working; folded into the answer bubble once it appears.
   const [liveSteps, setLiveSteps] = useState<ReasoningStep[] | null>(null);
@@ -465,6 +413,9 @@ export function App() {
   // Chat scrolling: stick to the bottom while the user is near it, otherwise
   // count new messages and offer a jump-to-bottom button.
   const conversationRef = useRef<HTMLDivElement | null>(null);
+  const conversationContentRef = useRef<HTMLDivElement | null>(null);
+  const scrollAnchorRef = useRef<{ top: number; height: number } | null>(null);
+  const lastScrollRef = useRef({ top: 0, height: 0 });
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   // Bumped on every workspace hydration; in-flight async flows (resume /
   // start / hydrate) abort their state writes when a newer switch wins.
@@ -592,17 +543,19 @@ export function App() {
     void probeModels();
   }, []);
 
-  async function refreshSessions() {
+  const refreshSessions = useLatestCallback(async () => {
+    const seq = switchSeqRef.current;
     if (!workspace) {
       setSessions([]);
       return;
     }
     try {
-      setSessions(await window.kripl.listAgentSessions());
+      const next = await window.kripl.listAgentSessions();
+      if (switchSeqRef.current === seq) setSessions(next);
     } catch {
-      setSessions([]);
+      if (switchSeqRef.current === seq) setSessions([]);
     }
-  }
+  });
 
   // Keep the session picker in sync with the workspace's Pi session catalog.
   useEffect(() => {
@@ -616,23 +569,24 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Trace main-thread freezes: any task longer than 50ms is logged with its
-  // duration and the current DOM size, so a hang on chat open is visible in
-  // diagnostics.log instead of being a mystery.
+  // Report freezes without scanning the entire DOM during an overloaded frame.
   useEffect(() => {
     let observer: PerformanceObserver | null = null;
+    let lastReport = -Infinity;
     try {
       observer = new PerformanceObserver((list) => {
-        for (const entry of list.getEntries()) {
-          diag("longtask", {
-            ms: Math.round(entry.duration),
-            domNodes: document.querySelectorAll("*").length
-          });
-        }
+        const now = performance.now();
+        if (now - lastReport < 5000) return;
+        lastReport = now;
+        const entries = list.getEntries();
+        diag("longtask", {
+          ms: Math.round(Math.max(...entries.map((entry) => entry.duration))),
+          count: entries.length
+        });
       });
       observer.observe({ entryTypes: ["longtask"] });
     } catch {
-      // Long-task tracing unsupported — diagnostics stay event-based.
+      // Long-task tracing is optional.
     }
     return () => observer?.disconnect();
   }, []);
@@ -715,48 +669,57 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [agentStatus]);
 
-  // Stick to the bottom while the user is near it; otherwise count new
-  // messages for the jump-to-bottom button. useLayoutEffect so the scroll
-  // happens before paint — a plain useEffect lets the grown content flash
-  // at the old scroll position first (the view "flies up" mid-stream).
+  // Keep the tail bounded during a live session too, not only on hydration.
+  // Loading older messages preserves the current reading position.
   useLayoutEffect(() => {
     const el = conversationRef.current;
     if (!el) return;
-    if (nearBottomRef.current) {
+    const anchor = scrollAnchorRef.current;
+    if (anchor) {
+      el.scrollTop = anchor.top + el.scrollHeight - anchor.height;
+      lastScrollRef.current = { top: el.scrollTop, height: el.scrollHeight };
+      scrollAnchorRef.current = null;
+    } else if (nearBottomRef.current) {
       el.scrollTop = el.scrollHeight;
+      lastScrollRef.current = { top: el.scrollTop, height: el.scrollHeight };
       seenFeedLengthRef.current = feed.length;
       setPendingMessages(0);
+      setFeedHidden(Math.max(0, feed.length - FEED_PAGE_SIZE));
     } else if (feed.length > seenFeedLengthRef.current) {
       setPendingMessages(feed.length - seenFeedLengthRef.current);
     }
-  }, [feed]);
+  }, [feed.length, feedHidden, workspaceView.type, binding?.sessionPath, binding?.agentId]);
 
-  // Content can grow after paint too (markdown reflow, images loading).
-  // Keep the view pinned while the user is at the bottom.
+  // A single size observer covers streamed text, image decode and resizing.
+  // No subtree mutation walk or repeated synchronous layout on every token.
   useEffect(() => {
     const el = conversationRef.current;
-    if (!el) return;
-    const observer = new MutationObserver(() => {
-      if (nearBottomRef.current) el.scrollTop = el.scrollHeight;
+    const content = conversationContentRef.current;
+    if (!el || !content) return;
+    let frame: number | null = null;
+    const observer = new ResizeObserver(() => {
+      if (!nearBottomRef.current || frame !== null) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        if (nearBottomRef.current) {
+          el.scrollTop = el.scrollHeight;
+          lastScrollRef.current = { top: el.scrollTop, height: el.scrollHeight };
+        }
+      });
     });
-    observer.observe(el, { childList: true, subtree: true, characterData: true });
-    return () => observer.disconnect();
-  }, [workspace, workspaceView]);
-
-  // Switching back to the agent tab remounts the scroll container at the top;
-  // restore the pinned position if the user was at the bottom before.
-  useEffect(() => {
-    if (!workspace || workspaceView.type !== "agent") return;
-    const el = conversationRef.current;
-    if (!el) return;
+    observer.observe(content);
+    observer.observe(el);
     if (nearBottomRef.current) {
       el.scrollTop = el.scrollHeight;
-      setAwayFromBottom(false);
+      lastScrollRef.current = { top: el.scrollTop, height: el.scrollHeight };
     }
-  }, [workspace, workspaceView]);
+    return () => {
+      observer.disconnect();
+      if (frame !== null) window.cancelAnimationFrame(frame);
+    };
+  }, [workspace?.path, workspaceView.type]);
 
-  useEffect(() => {
-    return window.kripl.onAgentEvent((rawEvent: AgentEvent) => {
+  const handleAgentEvent = useLatestCallback((rawEvent: AgentEvent) => {
       // Drop events from other (background) agent runtimes.
       const event = rawEvent as AgentEvent & { agentId?: number };
       const boundId = bindingAgentIdRef.current;
@@ -821,12 +784,12 @@ export function App() {
             last = { kind: "thinking", text: "" };
             steps.push(last);
           }
-          last.text += event.delta;
+          steps[steps.length - 1] = { ...last, text: last.text + event.delta };
         } else {
           // Completed without deltas: fill the block in once.
           const last = steps[steps.length - 1];
           if (last && last.kind === "thinking" && last.text === "") {
-            last.text = event.content;
+            steps[steps.length - 1] = { ...last, text: event.content };
           }
         }
         setLiveSteps([...steps]);
@@ -883,18 +846,18 @@ export function App() {
         }
 
         const targetId = existingId;
-        setFeed((current) =>
-          current.map((item) => {
-            if (item.kind !== "message" || item.id !== targetId) return item;
-            if (event.phase === "delta") {
-              return { ...item, text: item.text + event.delta };
-            }
-            if (!item.text) {
-              return { ...item, text: event.content };
-            }
-            return item;
-          })
-        );
+        setFeed((current) => {
+          // The streaming answer is normally the tail item; do not visit the
+          // entire history or recreate unchanged message objects per token.
+          const index = current.findLastIndex((item) => item.kind === "message" && item.id === targetId);
+          const item = current[index];
+          if (!item || item.kind !== "message") return current;
+          const text = event.phase === "delta" ? item.text + event.delta : (item.text || event.content);
+          if (text === item.text) return current;
+          const next = current.slice();
+          next[index] = { ...item, text };
+          return next;
+        });
         return;
       }
 
@@ -978,7 +941,7 @@ export function App() {
           callId: event.callId,
           name: event.name,
           phase: event.phase,
-          ...(event.payload === undefined ? {} : { payload: event.payload })
+          ...(event.payload === undefined ? {} : { preview: toolPayloadPreview(event.payload) })
         };
         // Mirror the tool call into the turn activity for the reasoning block,
         // keeping its position relative to the surrounding reasoning text.
@@ -994,8 +957,27 @@ export function App() {
         }
         setLiveSteps([...steps]);
       }
+  });
+
+  useEffect(() => {
+    const buffer = createAgentEventBuffer(
+      handleAgentEvent,
+      (flush) => window.requestAnimationFrame(flush),
+      (frame) => window.cancelAnimationFrame(frame)
+    );
+    streamBufferRef.current = buffer;
+    const unsubscribe = window.kripl.onAgentEvent((event) => {
+      const boundId = bindingAgentIdRef.current;
+      const sourceId = (event as AgentEvent & { agentId?: number }).agentId;
+      if (sourceId !== undefined && sourceId !== boundId) return;
+      buffer.push(event);
     });
-  }, []);
+    return () => {
+      unsubscribe();
+      buffer.clear();
+      streamBufferRef.current = null;
+    };
+  }, [handleAgentEvent]);
 
   const modelReady =
     probe.status === "ready" &&
@@ -1169,29 +1151,39 @@ export function App() {
     return dirty;
   }, [editorDrafts, workspaceTabs]);
 
-  // Fetch image/PDF previews for newly attached files (best-effort).
+  // Release composer previews when attachments leave it. Late reads from a
+  // previous selection must not refill the cache after sending or switching.
   useEffect(() => {
+    let cancelled = false;
+    const paths = new Set(attachments.map((file) => file.path));
+    setAttachmentPreviews((current) => {
+      const entries = Object.entries(current).filter(([path]) => paths.has(path));
+      return entries.length === Object.keys(current).length ? current : Object.fromEntries(entries);
+    });
     for (const file of attachments) {
       if (file.error || attachmentPreviews[file.path]) continue;
-      const lower = file.name.toLowerCase();
-      if (file.kind !== "image" && !lower.endsWith(".pdf")) continue;
+      if (file.kind !== "image" && !file.name.toLowerCase().endsWith(".pdf")) continue;
       void window.kripl.readAttachPreview(file.path).then((result) => {
-        if (result.ok && result.dataUrl) {
-          setAttachmentPreviews((current) => ({ ...current, [file.path]: result.dataUrl as string }));
+        if (!cancelled && result.ok && result.dataUrl) {
+          const dataUrl = result.dataUrl;
+          setAttachmentPreviews((current) => ({ ...current, [file.path]: dataUrl }));
         }
-      });
+      }).catch(() => {});
     }
+    return () => { cancelled = true; };
   }, [attachments]);
 
 
   async function disconnectAgent() {
     await window.kripl.stopAgent();
     setAgentStatus("stopped");
+    bindingAgentIdRef.current = null;
     setBinding(null);
     assistantMessageId.current = null;
   }
 
   function hydrateSessionSnapshot(snapshot: AgentSessionSnapshot) {
+    streamBufferRef.current?.clear();
     diag("hydrate begin", { messages: snapshot.messageCount });
     const t0 = Date.now();
     const restored: FeedItem[] = snapshot.messages
@@ -1257,75 +1249,34 @@ export function App() {
       totalMs: Date.now() - t0
     });
 
-    // Re-fetch stored image previews (best-effort; files may be gone).
-    const pending = restored.filter(
-      (item): item is MessageItem =>
-        item.kind === "message" && Boolean(item.imagePaths?.length)
-    );
-    if (pending.length > 0) {
-      // Cap the number of previews restored per session: screenshot-heavy
-      // chats would otherwise pull every image into renderer memory at once.
-      let budget = 12;
-      for (const item of pending) {
-        for (const path of item.imagePaths ?? []) {
-          if (budget <= 0) break;
-          budget -= 1;
-          void window.kripl.readAttachPreview(path).then((result) => {
-            if (!result.ok || !result.dataUrl) return;
-            const dataUrl = result.dataUrl;
-            setFeed((current) =>
-              current.map((entry): FeedItem => {
-                if (entry.kind !== "message" || entry.id !== item.id) return entry;
-                const next: MessageItem = { ...entry };
-                delete next.imagePaths;
-                next.images = [...(entry.images ?? []), dataUrl];
-                return next;
-              })
-            );
-          });
-        }
-      }
-    }
   }
 
-  async function syncActiveSessionFromRuntime() {
+  const syncActiveSessionFromRuntime = useLatestCallback(async () => {
+    const seq = switchSeqRef.current;
+    const agentId = bindingAgentIdRef.current;
+    const runIds = runAssistantIdsRef.current;
+    const reconcileTranscript = reconcileTranscriptOnReadyRef.current;
+    const streamedOwnRun = runIds.size > 0 && !reconcileTranscript;
     try {
-      const [snapshot, sessions] = await Promise.all([
-        window.kripl.getAgentSessionSnapshot(),
-        window.kripl.listAgentSessions()
-      ]);
-      if (!snapshot) return;
-      // The just-streamed transcript already carries reasoning blocks and tok/s
-      // that the normalized snapshot does not — keep it. Only hydrate when we
-      // did not stream this conversation ourselves (e.g. after a resume).
-      const streamedOwnRun = runAssistantIdsRef.current.size > 0;
-      if (!streamedOwnRun) {
-        hydrateSessionSnapshot(snapshot);
+      const snapshot = streamedOwnRun
+        ? await window.kripl.getAgentSessionInfo()
+        : await window.kripl.getAgentSessionSnapshot();
+      if (!snapshot || switchSeqRef.current !== seq || bindingAgentIdRef.current !== agentId) return;
+      if (!streamedOwnRun && runAssistantIdsRef.current === runIds &&
+          (reconcileTranscript || runIds.size === 0) && "messages" in snapshot) {
+        hydrateSessionSnapshot(snapshot as AgentSessionSnapshot);
+        reconcileTranscriptOnReadyRef.current = false;
       }
-      const persistedPath =
-        snapshot.sessionFile &&
-        sessions.some((session) => session.path === snapshot.sessionFile)
-          ? snapshot.sessionFile
-          : undefined;
-
+      const persistedPath = snapshot.sessionFile;
       if (persistedPath) {
-        // A brand-new chat just got its file — move the usage value from the
-        // shared slot to the real path so it survives restarts per-chat.
         const hadNoPath = !binding?.sessionPath;
-        setBinding((current) =>
-          current
-            ? {
-                ...current,
-                sessionPath: persistedPath
-              }
-            : current
-        );
+        setBinding((current) => current ? { ...current, sessionPath: persistedPath } : current);
         if (hadNoPath) migrateNewChatUsage(persistedPath);
       }
     } catch {
-      // Session metadata refresh must not interrupt the live agent UI.
+      // Metadata refresh must not interrupt the live UI.
     }
-  }
+  });
 
   function persistedView(view: WorkspaceView): DesktopUiState["workspaceView"] {
     if (view.type === "file") return { type: "file", path: view.file.path };
@@ -1407,9 +1358,16 @@ export function App() {
         : {}
     );
     setEditorRevealTarget(undefined);
+    bindingAgentIdRef.current = null;
     setBinding(null);
+    setEditingMessageId(null);
+    reconcileTranscriptOnReadyRef.current = false;
+    scrollAnchorRef.current = null;
     setAgentStatus("idle");
+    streamBufferRef.current?.clear();
     setFeed([]);
+    setAttachments([]);
+    setPdfPreviewPath(null);
     setFeedHidden(0);
     setLiveSteps(null);
     setInteraction(null);
@@ -1785,11 +1743,25 @@ export function App() {
       });
       return;
     }
-    const seq = switchSeqRef.current;
+    const seq = ++switchSeqRef.current;
+    bindingAgentIdRef.current = null;
+    setBinding(null);
+    setEditingMessageId(null);
+    reconcileTranscriptOnReadyRef.current = false;
+    scrollAnchorRef.current = null;
+    nearBottomRef.current = true;
+    setAwayFromBottom(false);
+    discardTurnActivity();
 
     setAgentError("");
     setAgentStatus("starting");
+    setInteraction(null);
+    runStartedAtRef.current = null;
+    setRunElapsed(0);
+    streamBufferRef.current?.clear();
     setFeed([]);
+    setAttachments([]);
+    setPdfPreviewPath(null);
     setFeedHidden(0);
     setLiveSteps(null);
     // Keep the last known context usage visible until live events replace it.
@@ -1815,6 +1787,7 @@ export function App() {
     if (!result.ok) {
       setAgentStatus("error");
       setAgentError(result.error ?? "Failed to start Pi agent.");
+      bindingAgentIdRef.current = null;
       setBinding(null);
       return;
     }
@@ -1826,6 +1799,7 @@ export function App() {
         diag("startAgent snapshot failed", { error: String(error) });
         return null;
       });
+    if (switchSeqRef.current !== seq) return;
     if (snapshot) {
       diag("startAgent snapshot fetched", {
         messages: snapshot.messageCount,
@@ -1841,6 +1815,7 @@ export function App() {
       sessionPath: resumeSessionPath ?? "",
       ...(typeof result.agentId === "number" ? { agentId: result.agentId } : {})
     };
+    bindingAgentIdRef.current = nextBinding.agentId ?? null;
     setBinding(nextBinding);
     rememberAgentBinding(nextBinding);
     setAgentStatus("ready");
@@ -1876,56 +1851,92 @@ export function App() {
       });
       return;
     }
-    const seq = switchSeqRef.current;
+    const seq = ++switchSeqRef.current;
+    bindingAgentIdRef.current = null;
+    setBinding(null);
+    setEditingMessageId(null);
+    reconcileTranscriptOnReadyRef.current = false;
+    scrollAnchorRef.current = null;
+    nearBottomRef.current = true;
+    setAwayFromBottom(false);
+    setAgentStatus("starting");
+    setAgentError("");
+    setInteraction(null);
+    setFeed([]);
+    setFeedHidden(0);
+    setAttachments([]);
+    setPdfPreviewPath(null);
+    discardTurnActivity();
+    assistantMessageId.current = null;
+    runStartedAtRef.current = null;
+    setRunElapsed(0);
     const t0 = Date.now();
     diag("resumeSession start", { sessionPath, feed: feed.length });
 
-    const attached = await window.kripl.attachAgent(sessionPath);
-    if (switchSeqRef.current !== seq) return;
-    diag("attach result", {
-      ok: attached.ok,
-      agentId: attached.agentId,
-      status: attached.status,
-      ms: Date.now() - t0
+    // Collect status from before attach begins: a background run can finish
+    // while attach or its snapshot is in flight, before the main feed is bound.
+    const statuses = new Map<number, Extract<AgentEvent, { type: "agent.status" }>>();
+    const stopCollecting = window.kripl.onAgentEvent((event) => {
+      const sourceId = (event as AgentEvent & { agentId?: number }).agentId;
+      if (event.type === "agent.status" && sourceId !== undefined) statuses.set(sourceId, event);
     });
-    if (attached.ok && typeof attached.agentId === "number") {
-      setEditingMessageId(null);
-      discardTurnActivity();
-      assistantMessageId.current = null;
-      nearBottomRef.current = true;
-      setAwayFromBottom(false);
-
-      const tSnap = Date.now();
-      const snapshot = await window.kripl.getAgentSessionSnapshot().catch((error) => {
-        diag("snapshot failed", { error: String(error) });
-        return null;
-      });
+    try {
+      const attached = await window.kripl.attachAgent(sessionPath);
       if (switchSeqRef.current !== seq) return;
-      diag("snapshot fetched", {
-        messages: snapshot?.messageCount ?? 0,
-        ms: Date.now() - tSnap
+      diag("attach result", {
+        ok: attached.ok,
+        agentId: attached.agentId,
+        status: attached.status,
+        ms: Date.now() - t0
       });
-      if (snapshot) hydrateSessionSnapshot(snapshot);
-      setUsage(loadChatUsage(sessionPath));
-
-      const nextBinding: AgentBinding = {
-        workspacePath: workspace.path,
-        endpoint,
-        modelId: selectedModel,
-        sessionPath,
-        agentId: attached.agentId
-      };
-      setBinding(nextBinding);
-      rememberAgentBinding(nextBinding);
-      if (attached.status && attached.status !== "ready") {
-        setAgentStatus(attached.status);
-        if (attached.status === "running" && runStartedAtRef.current === null) {
-          runStartedAtRef.current = Date.now();
+      if (attached.ok && typeof attached.agentId === "number") {
+        const targetId = attached.agentId;
+        const latestStatus = () => statuses.get(targetId)?.status ?? attached.status ?? "ready";
+        const statusBeforeSnapshot = latestStatus();
+        const tSnap = Date.now();
+        let snapshot = await window.kripl.getAgentSessionSnapshot();
+        if (switchSeqRef.current !== seq) return;
+        if ((statusBeforeSnapshot === "running" || statusBeforeSnapshot === "stopping") &&
+            latestStatus() === "ready") {
+          // A completed message may have been persisted after the first read.
+          snapshot = await window.kripl.getAgentSessionSnapshot();
+          if (switchSeqRef.current !== seq) return;
         }
+        if (!snapshot) throw new Error("The active session changed while opening. Select the chat again.");
+        diag("snapshot fetched", {
+          messages: snapshot.messageCount,
+          ms: Date.now() - tSnap
+        });
+        hydrateSessionSnapshot(snapshot);
+        setUsage(loadChatUsage(sessionPath));
+
+        const status = latestStatus();
+        reconcileTranscriptOnReadyRef.current = status === "running" || status === "stopping";
+        const nextBinding: AgentBinding = {
+          workspacePath: workspace.path,
+          endpoint,
+          modelId: selectedModel,
+          sessionPath,
+          agentId: targetId
+        };
+        bindingAgentIdRef.current = targetId;
+        setBinding(nextBinding);
+        rememberAgentBinding(nextBinding);
+        setAgentStatus(status);
+        if (status === "running" || status === "stopping") runStartedAtRef.current = Date.now();
+        if (status === "error") setAgentError(statuses.get(targetId)?.message ?? "Pi agent failed.");
+        void refreshSessions();
+        diag("resumeSession done (attached)", { ms: Date.now() - t0 });
+        return;
       }
-      void refreshSessions();
-      diag("resumeSession done (attached)", { ms: Date.now() - t0 });
+    } catch (error) {
+      if (switchSeqRef.current === seq) {
+        setAgentStatus("error");
+        setAgentError(error instanceof Error ? error.message : String(error));
+      }
       return;
+    } finally {
+      stopCollecting();
     }
 
     diag("resumeSession falling back to fresh agent.start", {
@@ -2023,12 +2034,16 @@ export function App() {
     }
     // If the deleted chat was open, reset the agent UI for a clean restart.
     if (binding?.sessionPath === session.path) {
+      bindingAgentIdRef.current = null;
       setBinding(null);
       discardTurnActivity();
       assistantMessageId.current = null;
       runStartedAtRef.current = null;
       setAgentStatus("idle");
+      streamBufferRef.current?.clear();
       setFeed([]);
+      setAttachments([]);
+      setPdfPreviewPath(null);
       setFeedHidden(0);
     }
     pushToast("success", "Чат удалён.");
@@ -2126,6 +2141,7 @@ export function App() {
 
   /** Drop pending activity (turn aborted or a new prompt starts). */
   function discardTurnActivity(): void {
+    streamBufferRef.current?.clear();
     turnActivityRef.current = [];
     runAssistantIdsRef.current = new Set();
     toolSinceMessageRef.current = false;
@@ -2207,7 +2223,7 @@ export function App() {
 
     const finalText = buildMessageWithAttachments(text, attachments);
     const imageFiles = attachments.filter(
-      (file) => !file.error && file.kind === "image" && attachmentPreviews[file.path]
+      (file) => !file.error && file.kind === "image"
     );
     const otherFiles = attachments
       .filter((file) => !file.error && file.kind !== "image")
@@ -2220,7 +2236,7 @@ export function App() {
       role: "user",
       text: text,
       ...(imageFiles.length > 0
-        ? { images: imageFiles.map((file) => attachmentPreviews[file.path] as string) }
+        ? { imagePaths: imageFiles.map((file) => file.path) }
         : {}),
       ...(otherFiles.length > 0 ? { files: otherFiles } : {})
     };
@@ -2264,6 +2280,7 @@ export function App() {
     if (
       !userMessage ||
       (userMessage.images && userMessage.images.length > 0) ||
+      (userMessage.imagePaths && userMessage.imagePaths.length > 0) ||
       (userMessage.files && userMessage.files.length > 0)
     )
       return;
@@ -2356,6 +2373,234 @@ export function App() {
     }
   }
 
+  const resubmitMessage = useLatestCallback(resubmitEdited);
+  const regenerateMessage = useLatestCallback(regenerateAnswer);
+  const editMessage = useLatestCallback((id: string | null) => {
+    if (editDraftRef.current?.id !== id) editDraftRef.current = null;
+    setEditingMessageId(id);
+  });
+  const getEditDraft = useLatestCallback((id: string) =>
+    editDraftRef.current?.id === id ? editDraftRef.current.text : undefined);
+  const changeEditDraft = useLatestCallback((id: string, text: string) => {
+    editDraftRef.current = { id, text };
+  });
+  const loadOlderMessages = useLatestCallback(() => {
+    const el = conversationRef.current;
+    if (!el) return;
+    scrollAnchorRef.current = { top: el.scrollTop, height: el.scrollHeight };
+    nearBottomRef.current = false;
+    setAwayFromBottom(true);
+    setFeedHidden((current) => Math.max(0, current - FEED_PAGE_SIZE));
+  });
+
+  const startSessionAction = useLatestCallback(() => startAgent());
+  const resumeSessionAction = useLatestCallback(resumeSession);
+  const renameSessionAction = useLatestCallback(commitSessionRename);
+  const openSessionMenuAction = useLatestCallback(openSessionMenu);
+  const openProjectMenuAction = useLatestCallback(openProjectMenu);
+  const openRecentProjectAction = useLatestCallback(openRecentProject);
+  const openWorkspaceAction = useLatestCallback(openWorkspace);
+  const refreshWorkspaceAction = useLatestCallback(refreshWorkspace);
+  const toggleDirectoryAction = useLatestCallback(toggleDirectory);
+  const openFileAction = useLatestCallback(openWorkspaceFile);
+  const openDiffAction = useLatestCallback(openWorkspaceDiff);
+  const showTerminalAction = useLatestCallback(() => setTerminalVisible(true));
+  const hideTerminalAction = useLatestCallback(() => setTerminalVisible(false));
+  const showSettingsAction = useLatestCallback(() => setSettingsOpen(true));
+  const hideSettingsAction = useLatestCallback(() => setSettingsOpen(false));
+  const showShortcutsAction = useLatestCallback(() => setShortcutsOpen(true));
+  const selectAgentAction = useLatestCallback(() => selectWorkspaceView({ type: "agent" }));
+  const selectWorkspaceViewAction = useLatestCallback(selectWorkspaceView);
+  const closeWorkspaceTabAction = useLatestCallback(closeWorkspaceTab);
+  const updateEditorDraftAction = useLatestCallback(updateEditorDraft);
+  const saveWorkspaceFileAction = useLatestCallback(saveWorkspaceFile);
+  const stageWorkspaceChangeAction = useLatestCallback(stageWorkspaceChange);
+  const unstageWorkspaceChangeAction = useLatestCallback(unstageWorkspaceChange);
+  const revertWorkspaceChangeAction = useLatestCallback(revertWorkspaceChange);
+  const probeModelsAction = useLatestCallback(probeModels);
+  const retrieveMemoryAction = useLatestCallback(retrieveMemory);
+  const commitWorkspaceChangesAction = useLatestCallback(commitWorkspaceChanges);
+  const applyRuntimeSettingsAction = useLatestCallback(async (next: DesktopRuntimeSettings) => {
+    const saved = await window.kripl.saveRuntimeSettings(next);
+    setRuntimeSettings(saved);
+  });
+  const sortedSessions = useMemo(() => [...sessions].sort((a, b) => b.modifiedAt - a.modifiedAt), [sessions]);
+  const sessionRail = useMemo(() => (
+        <aside className="session-rail">
+          <CollapsibleDetails
+            className="status-card session-card"
+            bodyClassName="sessions-body"
+            defaultOpen
+            summary={
+              <span className="session-heading">
+                <span className="eyebrow">Sessions</span>
+                <button
+                  className={"icon-button session-search-toggle" + (sessionSearchOpen ? " active" : "")}
+                  type="button"
+                  title={sessionSearchOpen ? "Hide chat search" : "Search across chats"}
+                  onClick={(event) => {
+                    event.preventDefault(); // do not toggle the panel
+                    const next = !sessionSearchOpen;
+                    if (!next) setSessionQuery("");
+                    setSessionSearchOpen(next);
+                  }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" strokeWidth="1.8" />
+                    <path
+                      d="M15.3 15.3L20 20"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </button>
+                <span className="session-heading-actions">
+                  <button
+                    className="icon-button"
+                    type="button"
+                    title="New session"
+                    disabled={!canStartAgent}
+                    onClick={(event) => {
+                      event.preventDefault(); // do not toggle the panel
+                      void startSessionAction();
+                    }}
+                  >
+                    +
+                  </button>
+                  <button
+                    className="icon-button"
+                    type="button"
+                    title="Refresh sessions"
+                    onClick={(event) => {
+                      event.preventDefault(); // do not toggle the panel
+                      void refreshSessions();
+                    }}
+                  >
+                    ↻
+                  </button>
+                  <span className="chevrons" aria-hidden="true">
+                    <svg className="chevron-down" width="14" height="9" viewBox="0 0 14 9" fill="none">
+                      <path d="M2 2.5l5 5 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    <svg className="chevron-up" width="14" height="9" viewBox="0 0 14 9" fill="none">
+                      <path d="M2 6.5l5-5 5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </span>
+                </span>
+              </span>
+            }
+          >
+
+            {!workspace ? (
+              <p className="sidebar-note">Open a project to list its chats.</p>
+            ) : !modelReady || !selectedModel ? (
+              <p className="sidebar-note">Connect a local model and pick one first.</p>
+            ) : (
+              <>
+                {sessionSearchOpen && (
+                  <input
+                    className="session-search"
+                    value={sessionQuery}
+                    placeholder="Поиск по чатам…"
+                    spellCheck={false}
+                    autoFocus
+                    onChange={(event) => setSessionQuery(event.target.value)}
+                  />
+                )}
+                {sessionSearchOpen && sessionQuery.trim().length >= 2 ? (
+                  sessionHits.length === 0 ? (
+                    <p className="sidebar-note">Ничего не найдено.</p>
+                  ) : (
+                    <div className="session-list">
+                      {sessionHits.map((hit, index) => (
+                        <button
+                          key={`${hit.sessionPath}-${index}`}
+                          type="button"
+                          className="session-hit"
+                          title={hit.snippet}
+                          onClick={() => void resumeSessionAction(hit.sessionPath)}
+                        >
+                          <span className="session-name">
+                            {hit.sessionName ?? basename(hit.sessionPath)}
+                          </span>
+                          <span className="session-meta">
+                            {hit.role === "user" ? "вы" : hit.role === "assistant" ? "Kripl" : "tool"} ·{" "}
+                            {hit.snippet}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )
+                ) : (
+                  <>
+                {sessions.length === 0 && (
+                  <p className="sidebar-note">No saved chats yet for this project.</p>
+                )}
+                <div className="session-list">
+                  {sortedSessions.map((session) => (
+                      <div
+                        key={session.path}
+                        className={
+                          "session-row" +
+                          (binding?.sessionPath === session.path ? " active" : "") +
+                          (liveSessionPaths.has(session.path) ? " live" : "")
+                        }
+                        onContextMenu={(event) => openSessionMenuAction(event, session)}
+                      >
+                        <button
+                          type="button"
+                          className="session-resume"
+                          disabled={!canStartAgent}
+                          title={`Resume ${session.name ?? basename(session.path)}`}
+                          onClick={() => void resumeSessionAction(session.path)}
+                        >
+                          <span className="session-name">
+                            {session.name && session.name !== basename(session.path)
+                              ? session.name
+                              : (session.firstMessage?.slice(0, 60) ?? basename(session.path))}
+                          </span>
+                          <span className="session-meta">
+                            {session.messageCount} msg · {new Date(session.modifiedAt).toLocaleString()}
+                          </span>
+                        </button>
+                        {renamingPath === session.path ? (
+                          <input
+                            className="session-rename-input"
+                            autoFocus
+                            value={renameValue}
+                            placeholder="Chat name (empty = reset)"
+                            onChange={(event) => setRenameValue(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") void renameSessionAction(session.path);
+                              else if (event.key === "Escape") setRenamingPath(null);
+                            }}
+                          />
+                        ) : null}
+                      </div>
+                    ))}
+                </div>
+                  </>
+                )}
+              </>
+            )}
+          </CollapsibleDetails>
+
+          <RecentProjectsCard
+            projects={recentProjects}
+            livePaths={liveProjectPaths}
+            currentPath={workspace?.path}
+            onOpen={(path) => void openRecentProjectAction(path)}
+            onContextMenu={(project, event) => openProjectMenuAction(event, project)}
+          />
+
+        </aside>
+  ), [workspace, modelReady, selectedModel, canStartAgent, binding?.sessionPath,
+    sessions, sortedSessions, sessionSearchOpen, sessionQuery, sessionHits, renamingPath,
+    renameValue, liveSessionPaths, liveProjectPaths, recentProjects, startSessionAction,
+    resumeSessionAction, renameSessionAction, openSessionMenuAction, openProjectMenuAction,
+    openRecentProjectAction, refreshSessions]);
+
   return (
     <div className={"app-shell" + (terminalVisible ? " terminal-open" : "")}>
       <header className="titlebar">
@@ -2424,16 +2669,16 @@ export function App() {
           expanded={expandedDirectories}
           changes={workspaceChanges}
           activePath={activeWorkspacePath(workspaceView)}
-          onOpenWorkspace={() => void openWorkspace()}
-          onRefresh={() => void refreshWorkspace()}
-          onToggleDirectory={(path) => void toggleDirectory(path)}
-          onOpenFile={(path) => void openWorkspaceFile(path)}
-          onOpenDiff={(path) => void openWorkspaceDiff(path)}
+          onOpenWorkspace={openWorkspaceAction}
+          onRefresh={refreshWorkspaceAction}
+          onToggleDirectory={toggleDirectoryAction}
+          onOpenFile={openFileAction}
+          onOpenDiff={openDiffAction}
           terminalOpen={terminalVisible}
-          onSelectTerminal={() => setTerminalVisible(true)}
-          onCloseTerminal={() => setTerminalVisible(false)}
-          onOpenSettings={() => setSettingsOpen(true)}
-          onShowShortcuts={() => setShortcutsOpen(true)}
+          onSelectTerminal={showTerminalAction}
+          onCloseTerminal={hideTerminalAction}
+          onOpenSettings={showSettingsAction}
+          onShowShortcuts={showShortcutsAction}
         />
 
         <main
@@ -2469,9 +2714,9 @@ export function App() {
             tabs={workspaceTabs}
             activeView={workspaceView}
             dirtyFiles={dirtyEditorPaths}
-            onSelectAgent={() => selectWorkspaceView({ type: "agent" })}
-            onSelect={selectWorkspaceView}
-            onClose={closeWorkspaceTab}
+            onSelectAgent={selectAgentAction}
+            onSelect={selectWorkspaceViewAction}
+            onClose={closeWorkspaceTabAction}
           />
 
           {workspaceView.type === "agent" ? (
@@ -2483,16 +2728,26 @@ export function App() {
             onScroll={() => {
               const el = conversationRef.current;
               if (!el) return;
-              const nearBottom =
-                el.scrollTop + el.clientHeight >= el.scrollHeight - 60;
-              nearBottomRef.current = nearBottom;
-              setAwayFromBottom(!nearBottom);
-              if (nearBottom) {
+              const top = el.scrollTop;
+              const height = el.scrollHeight;
+              const previous = lastScrollRef.current;
+              const nearBottom = top + el.clientHeight >= height - 60;
+              // Browser anchoring also emits scroll while streamed content
+              // grows or a live reasoning block collapses. Only upward motion
+              // without a content shrink should release an existing bottom pin.
+              const movedUp = top < previous.top - 1 && height >= previous.height;
+              const pinned = nearBottom || (nearBottomRef.current && !movedUp);
+              lastScrollRef.current = { top, height };
+              nearBottomRef.current = pinned;
+              setAwayFromBottom(!pinned);
+              if (pinned) {
                 seenFeedLengthRef.current = feed.length;
                 setPendingMessages(0);
+                setFeedHidden(Math.max(0, feed.length - FEED_PAGE_SIZE));
               }
             }}
           >
+            <div className="conversation-content" ref={conversationContentRef}>
             {feed.length === 0 ? (
               <section className="welcome-card">
                 <span className="eyebrow">Kripl Studio</span>
@@ -2510,273 +2765,27 @@ export function App() {
                 </div>
               </section>
             ) : (
-              <div className="transcript">
-                {visibleFeed !== feed && (
-                  <div className="feed-window-note">
-                    Показаны последние {visibleFeed.length} из {feed.length} сообщений
-                    <button
-                      type="button"
-                      onClick={() => setFeedHidden((current) => Math.max(0, current - FEED_PAGE_SIZE))}
-                    >
-                      Загрузить ещё {Math.min(FEED_PAGE_SIZE, feedHidden)}
-                    </button>
-                  </div>
-                )}
-                {visibleFeed.map((item) =>
-                  item.kind === "message" ? (
-                    <article key={item.id} className={`chat-message ${item.role}`}>
-                      <div className="message-role">
-                        <span className="message-role-left">
-                          <span>{item.role === "user" ? "You" : item.role === "assistant" ? "Kripl" : "System"}</span>
-                          {item.role === "assistant" && (
-                            <span className="message-stats">
-                              {(() => {
-                                const tokps =
-                                  item.tokps ??
-                                  (item.id === lastAssistantId
-                                    ? tokensPerSecond
-                                    : undefined);
-                                return tokps !== undefined ? (
-                                  <span className="message-tokps">{Math.round(tokps)} t/s</span>
-                                ) : null;
-                              })()}
-                              {item.text.trim() !== "" && (
-                                <span
-                                  className="message-tokens"
-                                  title="Оценка токенов в сообщении (≈4 символа на токен)"
-                                >
-                                  ≈{formatTokens(Math.max(1, Math.round(item.text.length / 4)))}
-                                </span>
-                              )}
-                            </span>
-                          )}
-                        </span>
-                        {item.role === "assistant" && (
-                          <span className="message-actions">
-                            {item.text.trim() !== "" && (
-                              <CopyIconButton text={item.text} title="Скопировать ответ" />
-                            )}
-                            {canSend && item.id === lastAssistantId && !item.images?.length && !item.files?.length ? (
-                              <button
-                                type="button"
-                                className="regenerate-button"
-                                title="Перегенерировать: удалить этот ответ и запустить промпт заново"
-                                onClick={() => void regenerateAnswer(item.id)}
-                              >
-                                ↻
-                              </button>
-                            ) : null}
-                          </span>
-                        )}
-                        {item.role === "user" && (
-                          <span className="message-actions">
-                            <button
-                              type="button"
-                              className="regenerate-button"
-                              title="Редактировать и отправить заново (хвост диалога будет заменён)"
-                              onClick={() => {
-                                setEditingMessageId(item.id);
-                                setEditValue(item.text ?? "");
-                              }}
-                            >
-                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                <path
-                                  d="M16.7 3.8a2.3 2.3 0 0 1 3.5 3L8.5 18.5l-4.6 1.3 1.3-4.6L16.7 3.8z"
-                                  stroke="currentColor"
-                                  strokeWidth="1.8"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                              </svg>
-                            </button>
-                          </span>
-                        )}
-                      </div>
-                      {item.role === "assistant" && item.reasoning ? (
-                        <CollapsibleDetails
-                          className="reasoning"
-                          bodyClassName="reasoning-body"
-                          summary={
-                            <>
-                              <span>Рассуждение</span>
-                              {item.reasoning.durationMs !== undefined && (
-                                <span className="reasoning-duration">
-                                  {formatReasoningDuration(item.reasoning.durationMs)}
-                                </span>
-                              )}
-                              <span className="chevrons" aria-hidden="true">
-                                <svg className="chevron-down" width="14" height="9" viewBox="0 0 14 9" fill="none">
-                                  <path d="M2 2.5l5 5 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                                </svg>
-                                <svg className="chevron-up" width="14" height="9" viewBox="0 0 14 9" fill="none">
-                                  <path d="M2 6.5l5-5 5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                                </svg>
-                              </span>
-                            </>
-                          }
-                        >
-                          {item.reasoning.steps.map((step, index) =>
-                            step.kind === "thinking" ? (
-                              <Markdown key={index} text={step.text} />
-                            ) : (
-                              <details
-                                key={step.tool.callId}
-                                className={`reasoning-tool ${step.tool.phase}`}
-                              >
-                                <summary>
-                                  <span>{step.tool.name}</span>
-                                  <span>{step.tool.phase}</span>
-                                </summary>
-                                {step.tool.payload !== undefined && (
-                                  <pre>{payloadPreview(step.tool.payload)}</pre>
-                                )}
-                              </details>
-                            )
-                          )}
-                        </CollapsibleDetails>
-                      ) : null}
-                      {item.images && item.images.length > 0 && (
-                        <div className="message-images">
-                          {item.images.map((src, index) => (
-                            <button
-                              key={index}
-                              type="button"
-                              className="message-image-button"
-                              title="Open full size"
-                              onClick={() => setLightboxSrc(src)}
-                            >
-                              <img src={src} alt="Attached image" />
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                      {item.files && item.files.length > 0 && (
-                        <div className="message-files">
-                          {item.files.map((file, index) => (
-                            <span key={index} className="file-chip" title={file.path}>
-                              <svg
-                                width="12"
-                                height="12"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                aria-hidden="true"
-                              >
-                                <path
-                                  d="M6 3h8l4 4v14H6V3z"
-                                  stroke="currentColor"
-                                  strokeWidth="1.8"
-                                  strokeLinejoin="round"
-                                />
-                                <path
-                                  d="M14 3v4h4"
-                                  stroke="currentColor"
-                                  strokeWidth="1.8"
-                                  strokeLinejoin="round"
-                                />
-                              </svg>
-                              {file.name}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      {editingMessageId === item.id ? (
-                        <div className="message-edit">
-                          <textarea
-                            value={editValue}
-                            autoFocus
-                            onChange={(event) => setEditValue(event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter" && !event.shiftKey) {
-                                event.preventDefault();
-                                void resubmitEdited(item.id, editValue);
-                              } else if (event.key === "Escape") {
-                                setEditingMessageId(null);
-                              }
-                            }}
-                          />
-                          <div className="message-edit-actions">
-                            <button
-                              type="button"
-                              className="icon-button"
-                              title="Отменить правку (Esc)"
-                              onClick={() => setEditingMessageId(null)}
-                            >
-                              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                                <path d="M1.5 1.5l9 9M10.5 1.5l-9 9" stroke="currentColor" strokeWidth="1.2" />
-                              </svg>
-                            </button>
-                            <button
-                              type="button"
-                              className="send-button"
-                              title="Отправить заново (Enter)"
-                              disabled={!editValue.trim()}
-                              onClick={() => void resubmitEdited(item.id, editValue)}
-                            >
-                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                <path
-                                  d="M12 19V5m0 0L6 11m6-6l6 6"
-                                  stroke="currentColor"
-                                  strokeWidth="2.3"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                              </svg>
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        (item.text ||
-                          (!item.images?.length && !item.files?.length)) && (
-                          <div className="message-text">
-                            {item.text ? <Markdown text={item.text} /> : "…"}
-                          </div>
-                        )
-                      )}
-                    </article>
-                  ) : (
-                    <details key={item.callId} className={`tool-card ${item.phase}`}>
-                      <summary>
-                        <span>{item.name}</span>
-                        <span>{item.phase}</span>
-                      </summary>
-                      {item.payload !== undefined && <pre>{payloadPreview(item.payload)}</pre>}
-                    </details>
-                  )
-                )}
-
-                {/* Live reasoning: written into the chat as it streams; folded
-                    into the final answer bubble once that message appears. */}
-                {liveSteps && (
-                  <details className="thinking-card" open>
-                    <summary>Рассуждение</summary>
-                    <div>
-                      {liveSteps.map((step, index) =>
-                        step.kind === "thinking" ? (
-                          step.text.trim() ? (
-                            <Markdown key={index} text={step.text} />
-                          ) : null
-                        ) : (
-                          <details
-                            key={step.tool.callId}
-                            className={`reasoning-tool ${step.tool.phase}`}
-                          >
-                            <summary>
-                              <span>{step.tool.name}</span>
-                              <span>{step.tool.phase}</span>
-                            </summary>
-                            {step.tool.payload !== undefined && (
-                              <pre>{payloadPreview(step.tool.payload)}</pre>
-                            )}
-                          </details>
-                        )
-                      )}
-                    </div>
-                  </details>
-                )}
-              </div>
+              <ChatTranscript
+                feed={visibleFeed}
+                totalCount={feed.length}
+                hiddenCount={feed.length - visibleFeed.length}
+                liveSteps={liveSteps}
+                lastAssistantId={lastAssistantId}
+                tokensPerSecond={tokensPerSecond}
+                canSend={canSend}
+                editingMessageId={editingMessageId}
+                onLoadOlder={loadOlderMessages}
+                onEdit={editMessage}
+                getEditDraft={getEditDraft}
+                onEditDraftChange={changeEditDraft}
+                onResubmit={resubmitMessage}
+                onRegenerate={regenerateMessage}
+                onOpenImage={setLightboxSrc}
+              />
             )}
 
             {agentError && <div className="agent-error">{agentError}</div>}
+            </div>
 
             {/* Sticky anchor: pins the pill to the visible bottom while the
                 user is scrolled up, sits at content end otherwise. */}
@@ -2977,216 +2986,16 @@ export function App() {
                   : undefined
               }
               revealTarget={editorRevealTarget}
-              onDraftChange={updateEditorDraft}
-              onSaveFile={saveWorkspaceFile}
-              onStage={stageWorkspaceChange}
-              onUnstage={unstageWorkspaceChange}
-              onRevert={revertWorkspaceChange}
+              onDraftChange={updateEditorDraftAction}
+              onSaveFile={saveWorkspaceFileAction}
+              onStage={stageWorkspaceChangeAction}
+              onUnstage={unstageWorkspaceChangeAction}
+              onRevert={revertWorkspaceChangeAction}
             />
           )}
         </main>
 
-        <aside className="session-rail">
-          <CollapsibleDetails
-            className="status-card session-card"
-            bodyClassName="sessions-body"
-            defaultOpen
-            summary={
-              <span className="session-heading">
-                <span className="eyebrow">Sessions</span>
-                <button
-                  className={"icon-button session-search-toggle" + (sessionSearchOpen ? " active" : "")}
-                  type="button"
-                  title={sessionSearchOpen ? "Hide chat search" : "Search across chats"}
-                  onClick={(event) => {
-                    event.preventDefault(); // do not toggle the panel
-                    const next = !sessionSearchOpen;
-                    if (!next) setSessionQuery("");
-                    setSessionSearchOpen(next);
-                  }}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" strokeWidth="1.8" />
-                    <path
-                      d="M15.3 15.3L20 20"
-                      stroke="currentColor"
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                </button>
-                <span className="session-heading-actions">
-                  <button
-                    className="icon-button"
-                    type="button"
-                    title="New session"
-                    disabled={!canStartAgent}
-                    onClick={(event) => {
-                      event.preventDefault(); // do not toggle the panel
-                      void startAgent();
-                    }}
-                  >
-                    +
-                  </button>
-                  <button
-                    className="icon-button"
-                    type="button"
-                    title="Refresh sessions"
-                    onClick={(event) => {
-                      event.preventDefault(); // do not toggle the panel
-                      void refreshSessions();
-                    }}
-                  >
-                    ↻
-                  </button>
-                  <span className="chevrons" aria-hidden="true">
-                    <svg className="chevron-down" width="14" height="9" viewBox="0 0 14 9" fill="none">
-                      <path d="M2 2.5l5 5 5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                    <svg className="chevron-up" width="14" height="9" viewBox="0 0 14 9" fill="none">
-                      <path d="M2 6.5l5-5 5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </span>
-                </span>
-              </span>
-            }
-          >
-
-            {!workspace ? (
-              <p className="sidebar-note">Open a project to list its chats.</p>
-            ) : !modelReady || !selectedModel ? (
-              <p className="sidebar-note">Connect a local model and pick one first.</p>
-            ) : (
-              <>
-                {sessionSearchOpen && (
-                  <input
-                    className="session-search"
-                    value={sessionQuery}
-                    placeholder="Поиск по чатам…"
-                    spellCheck={false}
-                    autoFocus
-                    onChange={(event) => setSessionQuery(event.target.value)}
-                  />
-                )}
-                {sessionSearchOpen && sessionQuery.trim().length >= 2 ? (
-                  sessionHits.length === 0 ? (
-                    <p className="sidebar-note">Ничего не найдено.</p>
-                  ) : (
-                    <div className="session-list">
-                      {sessionHits.map((hit, index) => (
-                        <button
-                          key={`${hit.sessionPath}-${index}`}
-                          type="button"
-                          className="session-hit"
-                          title={hit.snippet}
-                          onClick={() => void resumeSession(hit.sessionPath)}
-                        >
-                          <span className="session-name">
-                            {hit.sessionName ?? basename(hit.sessionPath)}
-                          </span>
-                          <span className="session-meta">
-                            {hit.role === "user" ? "вы" : hit.role === "assistant" ? "Kripl" : "tool"} ·{" "}
-                            {hit.snippet}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  )
-                ) : (
-                  <>
-                {sessions.length === 0 && (
-                  <p className="sidebar-note">No saved chats yet for this project.</p>
-                )}
-                <div className="session-list">
-                  {[...sessions]
-                    .sort((a, b) => b.modifiedAt - a.modifiedAt)
-                    .map((session) => (
-                      <div
-                        key={session.path}
-                        className={
-                          "session-row" +
-                          (binding?.sessionPath === session.path ? " active" : "") +
-                          (liveSessionPaths.has(session.path) ? " live" : "")
-                        }
-                        onContextMenu={(event) => openSessionMenu(event, session)}
-                      >
-                        <button
-                          type="button"
-                          className="session-resume"
-                          disabled={!canStartAgent}
-                          title={`Resume ${session.name ?? basename(session.path)}`}
-                          onClick={() => void resumeSession(session.path)}
-                        >
-                          <span className="session-name">
-                            {session.name && session.name !== basename(session.path)
-                              ? session.name
-                              : (session.firstMessage?.slice(0, 60) ?? basename(session.path))}
-                          </span>
-                          <span className="session-meta">
-                            {session.messageCount} msg · {new Date(session.modifiedAt).toLocaleString()}
-                          </span>
-                        </button>
-                        {renamingPath === session.path ? (
-                          <input
-                            className="session-rename-input"
-                            autoFocus
-                            value={renameValue}
-                            placeholder="Chat name (empty = reset)"
-                            onChange={(event) => setRenameValue(event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") void commitSessionRename(session.path);
-                              else if (event.key === "Escape") setRenamingPath(null);
-                            }}
-                          />
-                        ) : null}
-                      </div>
-                    ))}
-                </div>
-                  </>
-                )}
-              </>
-            )}
-          </CollapsibleDetails>
-
-          {runtimeSettings && (
-            <AgentPermissionsCard
-              settings={runtimeSettings}
-              onApply={async (next) => {
-                const saved = await window.kripl.saveRuntimeSettings(next);
-                setRuntimeSettings(saved);
-              }}
-            />
-          )}
-
-          {runtimeSettings && (
-            <ModelTuningCard
-              settings={runtimeSettings}
-              onApply={async (next) => {
-                const saved = await window.kripl.saveRuntimeSettings(next);
-                setRuntimeSettings(saved);
-              }}
-            />
-          )}
-
-          <RecentProjectsCard
-            projects={recentProjects}
-            livePaths={liveProjectPaths}
-            currentPath={workspace?.path}
-            onOpen={(path) => void openRecentProject(path)}
-            onContextMenu={(project, event) => openProjectMenu(event, project)}
-          />
-
-          {/* Branding loop pinned to the bottom of the rail. */}
-          <video
-            className="rail-loop"
-            src={kriplCodingLoop}
-            autoPlay
-            loop
-            muted
-            playsInline
-            aria-hidden="true"
-          />
-        </aside>
+        {sessionRail}
 
       </div>
 
@@ -3236,107 +3045,27 @@ export function App() {
       )}
 
       {settingsOpen && (
-        <div className="interaction-backdrop" role="presentation" onClick={() => setSettingsOpen(false)}>
-          <section
-            className="settings-dialog"
-            role="dialog"
-            aria-modal="true"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="settings-heading">
-              <h3>Settings</h3>
-              <button
-                type="button"
-                className="icon-button settings-close"
-                title="Close settings"
-                onClick={() => setSettingsOpen(false)}
-              >
-                ×
-              </button>
-            </div>
-
-            <ContextInspectorCard
-              snapshot={contextSnapshot}
-              onRetrieve={retrieveMemory}
-            />
-
-            <GitStatusCard
-              status={gitStatus}
-              repository={Boolean(workspace?.gitRepository)}
-              onCommit={commitWorkspaceChanges}
-            />
-
-            <div className="status-card">
-              <span className="eyebrow">Local model server</span>
-              <label className="endpoint-field">
-                <span>OpenAI-compatible endpoint</span>
-                <input
-                  value={endpoint}
-                  onChange={(event) => setEndpoint(event.target.value)}
-                  spellCheck={false}
-                  placeholder={DEFAULT_LOCAL_ENDPOINT}
-                />
-              </label>
-              <button
-                className="probe-button"
-                type="button"
-                disabled={probe.status === "checking"}
-                onClick={() => void probeModels()}
-              >
-                {probe.status === "checking" ? "Checking…" : "Connect local server"}
-              </button>
-
-              {probe.status === "idle" && <p className="probe-result">Default: LM Studio on port 1234.</p>}
-              {probe.status === "error" && <p className="probe-result error">{probe.message}</p>}
-              {probe.status === "ready" && probe.models.length === 0 && (
-                <p className="probe-result">Server is reachable, but it reports no loaded models.</p>
-              )}
-              {probe.status === "ready" && probe.models.length > 0 && (
-                <>
-                  <label className="endpoint-field">
-                <span>Context window override (tokens, empty = auto)</span>
-                <input
-                  value={contextWindowOverride ? String(contextWindowOverride) : ""}
-                  onChange={(event) => {
-                    const parsed = Number.parseInt(event.target.value, 10);
-                    setContextWindowOverride(
-                      Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
-                    );
-                  }}
-                  placeholder={String(DEFAULT_CONTEXT_WINDOW)}
-                  spellCheck={false}
-                />
-              </label>
-              <p className="probe-result ready">{probe.models.length} local model(s) found.</p>
-                  <select
-                    className="model-select"
-                    value={selectedModel}
-                    onChange={(event) => setSelectedModel(event.target.value)}
-                  >
-                    {probe.models.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.name}
-                      </option>
-                    ))}
-                  </select>
-                </>
-              )}
-            </div>
-
-            <div className="status-card">
-              <span className="eyebrow">Desktop</span>
-              <p className="detail">{appInfo ? `${appInfo.name} ${appInfo.version}` : "Loading…"}</p>
-              <p className="detail">{appInfo?.platform ?? "—"}</p>
-            </div>
-
-            <div className="status-card">
-              <span className="eyebrow">Next</span>
-              <ol>
-                <li>Add local checkpoints/worktree experiments and richer editor ergonomics.</li>
-              </ol>
-            </div>
-          </section>
-        </div>
+        <SettingsDialog
+          endpoint={endpoint}
+          onEndpointChange={setEndpoint}
+          defaultEndpoint={DEFAULT_LOCAL_ENDPOINT}
+          probe={probe}
+          onProbe={probeModelsAction}
+          selectedModel={selectedModel}
+          onModelChange={setSelectedModel}
+          contextWindowOverride={contextWindowOverride}
+          onContextWindowOverrideChange={setContextWindowOverride}
+          defaultContextWindow={DEFAULT_CONTEXT_WINDOW}
+          contextSnapshot={contextSnapshot}
+          onRetrieveMemory={retrieveMemoryAction}
+          gitStatus={gitStatus}
+          workspace={workspace}
+          onCommit={commitWorkspaceChangesAction}
+          appInfo={appInfo}
+          runtimeSettings={runtimeSettings}
+          onApplyRuntimeSettings={applyRuntimeSettingsAction}
+          onClose={hideSettingsAction}
+        />
       )}
 
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
@@ -3346,7 +3075,7 @@ export function App() {
         visible={terminalVisible}
         workspaceOpen={Boolean(workspace)}
         workspaceKey={workspace?.path ?? ""}
-        onClose={() => setTerminalVisible(false)}
+        onClose={hideTerminalAction}
       />
 
       {interaction && (

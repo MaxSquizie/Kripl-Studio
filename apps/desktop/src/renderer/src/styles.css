@@ -814,16 +814,6 @@ button {
   align-self: center;
 }
 
-/* Branding loop pinned to the bottom of the right rail:
-   as wide as the rail, square. */
-.rail-loop {
-  margin-top: auto;
-  display: block;
-  width: 100%;
-  aspect-ratio: 1 / 1;
-  object-fit: cover;
-}
-
 /* Sessions panel: plain rectangle, no frame. Collapsible like the other tabs. */
 .session-card {
   margin: 0;

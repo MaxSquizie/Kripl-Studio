@@ -8,6 +8,8 @@ import "./model-provider.css";
 import "./agent.css";
 import "@xterm/xterm/css/xterm.css";
 import "./terminal.css";
+import "./settings.css";
+import "./message-images.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Renderer root element was not found.");
@@ -41,15 +43,11 @@ if (!window.kripl) {
     </main>
   `;
 } else {
-  // Minimized/occluded: pause CSS animations and the rail video. Keeps the
+  // Minimized/occluded: pause CSS animations. Keeps the
   // compositor idle while hidden (the snake border animation used to coincide
   // with renderer deaths in minimized windows).
   const syncHiddenState = (): void => {
     document.body.classList.toggle("app-hidden", document.hidden);
-    for (const video of document.querySelectorAll<HTMLVideoElement>("video")) {
-      if (document.hidden) video.pause();
-      else void video.play().catch(() => undefined);
-    }
   };
   document.addEventListener("visibilitychange", syncHiddenState);
   syncHiddenState();

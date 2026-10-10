@@ -10,7 +10,8 @@
     "start": "electron-vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dist:win": "npm run build && electron-builder --win nsis",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.85.1",
@@ -34,6 +35,7 @@
     "electron-builder": "26.15.3",
     "electron-updater": "6.8.9",
     "electron-vite": "5.0.0",
+    "esbuild": "0.25.12",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "typescript": "5.9.3",

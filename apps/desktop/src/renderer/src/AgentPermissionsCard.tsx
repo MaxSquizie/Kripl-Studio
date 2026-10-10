@@ -1,5 +1,5 @@
 import type { DesktopRuntimeSettings, PermissionEffect, PermissionScope } from "@kripl/core";
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { CollapsibleDetails } from "./CollapsibleDetails";
 
 const EFFECTS: PermissionEffect[] = ["allow", "ask", "deny"];
@@ -23,23 +23,26 @@ function cloneRules(settings: DesktopRuntimeSettings) {
   return { ...settings.permissions.rules };
 }
 
-export function AgentPermissionsCard({
+export const AgentPermissionsCard = memo(function AgentPermissionsCard({
   settings,
-  onApply
+  onApply,
+  embedded = false
 }: {
   settings: DesktopRuntimeSettings;
   onApply(next: DesktopRuntimeSettings): Promise<void>;
+  embedded?: boolean;
 }) {
   const [draft, setDraft] = useState<Partial<Record<PermissionScope, PermissionEffect>>>(
     () => cloneRules(settings)
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const rulesVersion = JSON.stringify(settings.permissions.rules);
 
   useEffect(() => {
     setDraft(cloneRules(settings));
     setError("");
-  }, [settings]);
+  }, [rulesVersion]);
 
   const dirty = PERMISSION_ROWS.some(
     (row) => (draft[row.scope] ?? "ask") !== (settings.permissions.rules[row.scope] ?? "ask")
@@ -54,8 +57,7 @@ export function AgentPermissionsCard({
     setError("");
     try {
       await onApply({
-        networkMode: settings.networkMode,
-        modelRouting: settings.modelRouting,
+        ...settings,
         permissions: { version: 1, rules: draft }
       });
     } catch (reason) {
@@ -66,6 +68,84 @@ export function AgentPermissionsCard({
   }
 
   let currentGroup = "";
+
+  const contents = (
+    <>
+      {settings.networkMode !== "online" && (
+        <p className="permissions-mode-hint">
+          Network mode is {settings.networkMode}: network rules are{" "}
+          {settings.networkMode === "offline" ? "forced to deny" : "upgraded to ask"}.
+        </p>
+      )}
+
+      <div className="permission-settings-body permissions-list">
+        {PERMISSION_ROWS.map((row) => {
+          const showGroup = row.group !== currentGroup;
+          currentGroup = row.group;
+          const selected: PermissionEffect = draft[row.scope] ?? "ask";
+          return (
+            <div key={row.scope}>
+              {showGroup && <div className="permission-group">{row.group}</div>}
+              <label className="permission-setting">
+                <span>{row.label}</span>
+                <select value={selected} disabled={saving} onChange={(event) => setEffect(row.scope, event.target.value as PermissionEffect)}>
+                  {EFFECTS.map((effect) => (
+                    <option key={effect} value={effect}>
+                      {effect}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          );
+        })}
+      </div>
+
+      {error && <p className="probe-result error" role="alert">{error}</p>}
+
+      <div className="settings-actions">
+        {embedded && (
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={!dirty || saving}
+            onClick={() => {
+              setDraft(cloneRules(settings));
+              setError("");
+            }}
+          >
+            Reset
+          </button>
+        )}
+        <button
+          type="button"
+          className={embedded ? "primary-button" : "apply-check" + (dirty && !saving ? " ready" : "")}
+          title={dirty ? "Apply permission changes" : "No pending changes"}
+          aria-label="Apply permissions"
+          disabled={!dirty || saving}
+          onClick={() => void apply()}
+        >
+          {embedded ? (saving ? "Applying…" : "Apply permissions") : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M5 13l4 4L19 7"
+              stroke="currentColor"
+              strokeWidth="2.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>}
+        </button>
+      </div>
+
+      {dirty && (
+        <p className="settings-hint">Applying stops the active agent; the next run uses the new policy.</p>
+      )}
+    </>
+  );
+
+  if (embedded) {
+    return <div className="settings-embedded">{contents}</div>;
+  }
 
   return (
     <CollapsibleDetails
@@ -85,61 +165,7 @@ export function AgentPermissionsCard({
         </>
       }
     >
-      {settings.networkMode !== "online" && (
-        <p className="permissions-mode-hint">
-          Network mode is {settings.networkMode}: network rules are{" "}
-          {settings.networkMode === "offline" ? "forced to deny" : "upgraded to ask"}.
-        </p>
-      )}
-
-      <div className="permission-settings-body permissions-list">
-        {PERMISSION_ROWS.map((row) => {
-          const showGroup = row.group !== currentGroup;
-          currentGroup = row.group;
-          const selected: PermissionEffect = draft[row.scope] ?? "ask";
-          return (
-            <div key={row.scope}>
-              {showGroup && <div className="permission-group">{row.group}</div>}
-              <label className="permission-setting">
-                <span>{row.label}</span>
-                <select value={selected} onChange={(event) => setEffect(row.scope, event.target.value as PermissionEffect)}>
-                  {EFFECTS.map((effect) => (
-                    <option key={effect} value={effect}>
-                      {effect}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          );
-        })}
-      </div>
-
-      {error && <p className="probe-result error">{error}</p>}
-
-      <div className="settings-actions">
-        <button
-          type="button"
-          className={"apply-check" + (dirty && !saving ? " ready" : "")}
-          title={dirty ? "Apply permission changes" : "No pending changes"}
-          disabled={!dirty || saving}
-          onClick={() => void apply()}
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path
-              d="M5 13l4 4L19 7"
-              stroke="currentColor"
-              strokeWidth="2.6"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </button>
-      </div>
-
-      {dirty && (
-        <p className="settings-hint">Applying stops the active agent; the next run uses the new policy.</p>
-      )}
+      {contents}
     </CollapsibleDetails>
   );
-}
+});

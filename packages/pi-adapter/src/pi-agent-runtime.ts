@@ -4,6 +4,7 @@ import type {
   AgentInput,
   AgentInteractionResponse,
   AgentRuntime,
+  AgentSessionInfo,
   AgentSessionSnapshot,
   AgentStartOptions,
   NetworkMode,
@@ -185,14 +186,9 @@ export class PiAgentRuntime implements AgentRuntime {
     });
   }
 
-  async getSessionSnapshot(): Promise<AgentSessionSnapshot> {
-    const [stateResponse, messagesResponse] = await Promise.all([
-      this.rpc.send({ type: "get_state" }),
-      this.rpc.send({ type: "get_messages" })
-    ]);
-
-    const state = responseData(stateResponse);
-    const messagesData = responseData(messagesResponse);
+  /** Metadata reads must not fetch/normalize an ever-growing transcript. */
+  async getSessionInfo(): Promise<AgentSessionInfo> {
+    const state = responseData(await this.rpc.send({ type: "get_state" }));
     const sessionId = optionalString(state.sessionId);
     if (!sessionId) {
       throw new Error("Pi session state is missing sessionId.");
@@ -209,7 +205,19 @@ export class PiAgentRuntime implements AgentRuntime {
       ...(sessionFile ? { sessionFile } : {}),
       sessionId,
       ...(sessionName ? { sessionName } : {}),
-      messageCount,
+      messageCount
+    };
+  }
+
+  async getSessionSnapshot(): Promise<AgentSessionSnapshot> {
+    const [info, messagesResponse] = await Promise.all([
+      this.getSessionInfo(),
+      this.rpc.send({ type: "get_messages" })
+    ]);
+    const messagesData = responseData(messagesResponse);
+
+    return {
+      ...info,
       messages: normalizePiSessionMessages(messagesData.messages)
     };
   }

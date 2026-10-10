@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { WorkspaceDiff, WorkspaceFilePreview } from "@kripl/core";
 import { useEffect, useRef, useState } from "react";
 
@@ -449,7 +450,7 @@ function DiffReview({
   );
 }
 
-export function WorkspaceContent({
+export const WorkspaceContent = memo(function WorkspaceContent({
   view,
   draft,
   revealTarget,
@@ -500,4 +501,4 @@ export function WorkspaceContent({
       </div>
     </>
   );
-}
+});

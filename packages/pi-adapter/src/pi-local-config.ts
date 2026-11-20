@@ -1,11 +1,15 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { LocalModelServer } from "@kripl/core";
 
 export const KRIPL_PI_PROVIDER = "kripl-local";
+export const KRIPL_LOCAL_MODEL_API_KEY_ENV = "KRIPL_LOCAL_MODEL_API_KEY";
 
 export interface PiLocalModelConfig {
   baseUrl: string;
   modelId: string;
+  server?: LocalModelServer;
+  apiKey?: string;
   /**
    * Declare image input support in the generated models.json so Pi can send
    * attached images to vision-capable local models (e.g. Qwen3.8-27B).
@@ -64,7 +68,7 @@ export async function writePiLocalModelConfig(
       [KRIPL_PI_PROVIDER]: {
         baseUrl,
         api: "openai-completions",
-        apiKey: "kripl-local",
+        apiKey: `$${KRIPL_LOCAL_MODEL_API_KEY_ENV}`,
         compat: {
           supportsDeveloperRole: false,
           supportsReasoningEffort: false

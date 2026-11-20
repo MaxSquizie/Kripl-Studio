@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentStatus, AttachedFile, AgentInteractionResponse, AgentSessionSearchHit, AgentSessionInfo, AgentSessionSnapshot, AgentSessionSummary, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
+import type { AgentEvent, AgentStatus, AttachedFile, AgentInteractionResponse, AgentSessionSearchHit, AgentSessionInfo, AgentSessionSnapshot, AgentSessionSummary, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, LocalModelConnection, LocalModelCredentialStatus, LocalModelSelection, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
 
 declare module "*.png" {
   const src: string;
@@ -47,7 +47,9 @@ declare global {
       revertWorkspaceChange(path: string): Promise<void>;
       getWorkspaceGitStatus(): Promise<WorkspaceGitStatus | null>;
       commitWorkspaceChanges(message: string): Promise<WorkspaceCommitResult>;
-      probeLocalModels(endpoint: string): Promise<{
+      getLocalModelCredentialStatus(connection: LocalModelConnection): Promise<LocalModelCredentialStatus>;
+      setLocalModelApiKey(connection: LocalModelConnection, apiKey: string): Promise<LocalModelCredentialStatus>;
+      probeLocalModels(connection: string | LocalModelConnection): Promise<{
         ok: boolean;
         endpoint: string;
         models: Array<{
@@ -63,13 +65,9 @@ declare global {
       listAgentSessions(): Promise<AgentSessionSummary[]>;
       renameAgentSession(sessionPath: string, name: string): Promise<ActionResult>;
       onAgentSessionsChanged(listener: () => void): () => void;
-      startAgent(request: {
-        endpoint: string;
-        modelId: string;
-        sessionPath?: string;
-      }): Promise<ActionResult & { agentId?: number }>;
+      startAgent(request: LocalModelSelection & { sessionPath?: string }): Promise<ActionResult & { agentId?: number }>;
       attachAgent(sessionPath: string): Promise<
-        ActionResult & { agentId?: number; status?: AgentStatus }
+        ActionResult & { agentId?: number; status?: AgentStatus; model?: LocalModelSelection; credentialsChanged?: boolean }
       >;
       deleteAgentSession(sessionPath: string): Promise<ActionResult>;
       trayMenuAction(action: "show" | "quit" | "close"): Promise<void>;

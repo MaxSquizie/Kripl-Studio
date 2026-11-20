@@ -1,7 +1,8 @@
-import type { NetworkMode, ToolBridgeConnection } from "@kripl/core";
+import type { LocalModelServer, NetworkMode, ToolBridgeConnection } from "@kripl/core";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { KRIPL_LOCAL_MODEL_API_KEY_ENV } from "./pi-local-config.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -15,6 +16,8 @@ export interface PiRpcStartOptions {
   sessionDir?: string;
   networkMode?: NetworkMode;
   toolBridge?: ToolBridgeConnection;
+  localModelServer?: LocalModelServer;
+  localModelApiKey?: string;
 }
 
 const rpcEntryPath = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent/rpc-entry"));
@@ -57,6 +60,10 @@ const CLOUD_MODEL_PROVIDER_ENV_KEYS = [
 ] as const;
 
 export function createPiEnvironment(options: PiRpcStartOptions): NodeJS.ProcessEnv {
+  const apiKey = options.localModelApiKey?.trim();
+  if (apiKey && (apiKey.length > 8192 || /[^\x21-\x7e]/.test(apiKey))) {
+    throw new Error("Local model API key is invalid.");
+  }
   const environment: NodeJS.ProcessEnv = { ...process.env };
 
   for (const key of CLOUD_MODEL_PROVIDER_ENV_KEYS) {
@@ -68,6 +75,8 @@ export function createPiEnvironment(options: PiRpcStartOptions): NodeJS.ProcessE
   environment.PI_SKIP_VERSION_CHECK = "1";
   environment.PI_CODING_AGENT_DIR = options.agentDir;
   environment.KRIPL_NETWORK_MODE = options.networkMode ?? "online";
+  environment.KRIPL_LOCAL_MODEL_SERVER = options.localModelServer ?? "lm-studio";
+  environment[KRIPL_LOCAL_MODEL_API_KEY_ENV] = apiKey || (options.localModelServer === "unsloth" ? "not-needed" : "kripl-local");
 
   if (options.toolBridge) {
     environment.KRIPL_TOOL_BRIDGE_URL = options.toolBridge.baseUrl;

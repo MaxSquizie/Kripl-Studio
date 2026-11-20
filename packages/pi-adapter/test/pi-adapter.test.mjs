@@ -40,7 +40,7 @@ test("writes an isolated Pi provider config for the selected local model", async
 
     assert.equal(provider.baseUrl, "http://127.0.0.1:1234/v1");
     assert.equal(provider.api, "openai-completions");
-    assert.equal(provider.apiKey, "kripl-local");
+    assert.equal(provider.apiKey, "$KRIPL_LOCAL_MODEL_API_KEY");
     assert.equal(provider.models[0].id, "qwen-local");
     assert.equal(provider.models[0].cost.input, 0);
   } finally {

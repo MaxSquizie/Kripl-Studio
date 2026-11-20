@@ -1,4 +1,4 @@
-import type { ModelDescriptor, ModelProvider, ModelProviderHealth } from "@kripl/core";
+import type { LocalModelServer, ModelDescriptor, ModelProvider, ModelProviderHealth } from "@kripl/core";
 import { localModelsUrl, normalizeLocalOpenAIBaseUrl } from "./endpoint-policy.js";
 
 interface OpenAIModelRecord {
@@ -11,6 +11,11 @@ interface OpenAIModelRecord {
   loaded_context_length?: unknown;
   context_window?: unknown;
   max_model_len?: unknown;
+  context_length?: unknown;
+  display_name?: unknown;
+  loaded?: unknown;
+  status?: unknown;
+  task?: unknown;
 }
 
 interface OpenAIModelsPayload {
@@ -19,6 +24,8 @@ interface OpenAIModelsPayload {
 
 export interface LocalOpenAIProviderOptions {
   baseUrl: string;
+  server?: LocalModelServer;
+  apiKey?: string;
   requestTimeoutMs?: number;
 }
 
@@ -32,15 +39,32 @@ function positiveInt(value: unknown): number | undefined {
   return value > 1_048_576 ? undefined : value;
 }
 
+function isUnslothChatModel(item: OpenAIModelRecord): boolean {
+  if (item.loaded === false) return false;
+  const status = item.status && typeof item.status === "object"
+    ? (item.status as { value?: unknown }).value : item.status;
+  if (typeof status === "string" && status !== "loaded" && status !== "ready") return false;
+  return item.task === undefined || item.task === null || item.task === "" ||
+    item.task === "chat" || item.task === "text-generation" || item.task === "conversational";
+}
+
 export class LocalOpenAIProvider implements ModelProvider {
   readonly id = "model:local-openai";
   readonly baseUrl: string;
 
   private readonly requestTimeoutMs: number;
+  private readonly server: LocalModelServer;
+  private readonly headers: Record<string, string>;
 
   constructor(options: LocalOpenAIProviderOptions) {
     this.baseUrl = normalizeLocalOpenAIBaseUrl(options.baseUrl);
-    this.requestTimeoutMs = options.requestTimeoutMs ?? 2_500;
+    this.server = options.server ?? "lm-studio";
+    this.requestTimeoutMs = options.requestTimeoutMs ?? (this.server === "unsloth" ? 15_000 : 2_500);
+    const apiKey = options.apiKey?.trim();
+    if (apiKey && (apiKey.length > 8192 || /[^\x21-\x7e]/.test(apiKey))) {
+      throw new Error("Local model API key is invalid.");
+    }
+    this.headers = { accept: "application/json", ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) };
   }
 
   async health(): Promise<ModelProviderHealth> {
@@ -59,16 +83,21 @@ export class LocalOpenAIProvider implements ModelProvider {
   async listModels(): Promise<ModelDescriptor[]> {
     const response = await fetch(localModelsUrl(this.baseUrl), {
       method: "GET",
-      headers: { accept: "application/json" },
+      headers: this.headers,
       redirect: "error",
       signal: AbortSignal.timeout(this.requestTimeoutMs)
     });
 
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        throw new Error(`Local model server requires a valid API key with model access (HTTP ${response.status}). Check the API key in Settings → Model.`);
+      }
       throw new Error(`Local model server returned HTTP ${response.status}.`);
     }
 
-    const payload = (await response.json()) as OpenAIModelsPayload;
+    const payload = await response.json().catch(() => {
+      throw new Error("Local model server returned an invalid /models payload.");
+    }) as OpenAIModelsPayload;
     if (!Array.isArray(payload.data)) {
       throw new Error("Local model server returned an invalid /models payload.");
     }
@@ -76,9 +105,11 @@ export class LocalOpenAIProvider implements ModelProvider {
     const models: ModelDescriptor[] = [];
     for (const item of payload.data as OpenAIModelRecord[]) {
       if (!item || typeof item.id !== "string" || !item.id.trim()) continue;
+      if (this.server === "unsloth" && !isUnslothChatModel(item)) continue;
       const id = item.id.trim();
       const contextWindow = positiveInt(
-        item.max_context_size ??
+        (this.server === "unsloth" ? item.context_length : undefined) ??
+          item.max_context_size ??
           item.max_context_length ??
           item.loaded_context_length ??
           item.context_window ??
@@ -87,14 +118,15 @@ export class LocalOpenAIProvider implements ModelProvider {
       models.push({
         provider: "local-openai",
         id,
-        name: id,
+        name: this.server === "unsloth" && typeof item.display_name === "string" && item.display_name.trim()
+          ? item.display_name.trim() : id,
         local: true,
         input: ["text"],
         ...(contextWindow ? { contextWindow } : {})
       });
     }
 
-    if (!models.some((model) => model.contextWindow)) {
+    if (this.server === "lm-studio" && !models.some((model) => model.contextWindow)) {
       const lmStudioContext = await this.fetchLmStudioContextWindows();
       for (const model of models) {
         if (model.contextWindow) continue;
@@ -126,7 +158,7 @@ export class LocalOpenAIProvider implements ModelProvider {
     try {
       const response = await fetch(url.toString(), {
         method: "GET",
-        headers: { accept: "application/json" },
+        headers: this.headers,
         redirect: "error",
         signal: AbortSignal.timeout(Math.max(this.requestTimeoutMs, 8_000))
       });

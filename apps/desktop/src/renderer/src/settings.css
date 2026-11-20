@@ -226,6 +226,72 @@
   gap: 10px;
 }
 
+.settings-connection .settings-endpoint {
+  grid-column: 1 / -1;
+}
+
+.settings-key-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 18px;
+}
+
+.settings-key-status p,
+.settings-credential-error {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.settings-credential-error {
+  color: var(--error-bright);
+}
+
+.settings-window .settings-key-remove {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.settings-window .settings-key-remove:hover {
+  color: var(--error-bright);
+}
+
+.model-connection-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.model-connection-notice button {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--bg-raised);
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.model-connection-notice button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .settings-connection-status {
   min-height: 18px;
   margin-top: -4px;

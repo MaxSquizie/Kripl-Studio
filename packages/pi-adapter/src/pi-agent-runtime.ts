@@ -21,6 +21,7 @@ import {
 } from "./pi-local-config.js";
 import { writePiBrowserTools } from "./pi-browser-tools.js";
 import { writePiModelTuning } from "./pi-model-tuning.js";
+import { writePiLocalCompatibility } from "./pi-local-compat.js";
 import { writePiPermissionGate } from "./pi-permission-gate.js";
 import { writePiTextToolBridge } from "./pi-text-tools.js";
 import { writePiWebTools } from "./pi-web-tools.js";
@@ -80,6 +81,7 @@ export class PiAgentRuntime implements AgentRuntime {
       const networkMode = this.options.networkMode ?? "online";
       await Promise.all([
         writePiLocalModelConfig(this.options.agentDir, this.options.localModel),
+        writePiLocalCompatibility(this.options.agentDir),
         writePiPermissionGate(
           this.options.agentDir,
           this.options.permissionPolicy ?? DEFAULT_PERMISSION_POLICY
@@ -102,6 +104,8 @@ export class PiAgentRuntime implements AgentRuntime {
 
       const rpcOptions = {
         agentDir: this.options.agentDir,
+        localModelServer: this.options.localModel.server ?? "lm-studio",
+        ...(this.options.localModel.apiKey ? { localModelApiKey: this.options.localModel.apiKey } : {}),
         ...(this.options.sessionDir ? { sessionDir: this.options.sessionDir } : {}),
         ...(this.options.networkMode ? { networkMode: this.options.networkMode } : {}),
         ...(this.options.toolBridge ? { toolBridge: this.options.toolBridge } : {})

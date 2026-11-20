@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentStatus, AttachedFile, AgentInteractionResponse, AgentSessionInfo, AgentSessionSearchHit, AgentSessionSnapshot, AgentSessionSummary, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
+import type { AgentEvent, AgentStatus, AttachedFile, AgentInteractionResponse, AgentSessionInfo, AgentSessionSearchHit, AgentSessionSnapshot, AgentSessionSummary, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, LocalModelConnection, LocalModelCredentialStatus, LocalModelSelection, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 const IPC = {
@@ -32,6 +32,8 @@ const IPC = {
   workspaceGitStatus: "kripl:workspace-git-status",
   workspaceCommit: "kripl:workspace-commit",
   probeLocalModels: "kripl:probe-local-models",
+  localModelCredentialStatus: "kripl:local-model-credential-status",
+  localModelApiKey: "kripl:local-model-api-key",
   agentSessions: "kripl:agent-sessions",
   agentRenameSession: "kripl:agent-rename-session",
   agentSessionsChanged: "kripl:agent-sessions-changed",
@@ -146,8 +148,14 @@ const api = {
   commitWorkspaceChanges: (message: string) =>
     ipcRenderer.invoke(IPC.workspaceCommit, message) as Promise<WorkspaceCommitResult>,
 
-  probeLocalModels: (endpoint: string) =>
-    ipcRenderer.invoke(IPC.probeLocalModels, endpoint) as Promise<{
+  getLocalModelCredentialStatus: (connection: LocalModelConnection) =>
+    ipcRenderer.invoke(IPC.localModelCredentialStatus, connection) as Promise<LocalModelCredentialStatus>,
+
+  setLocalModelApiKey: (connection: LocalModelConnection, apiKey: string) =>
+    ipcRenderer.invoke(IPC.localModelApiKey, connection, apiKey) as Promise<LocalModelCredentialStatus>,
+
+  probeLocalModels: (connection: string | LocalModelConnection) =>
+    ipcRenderer.invoke(IPC.probeLocalModels, connection) as Promise<{
       ok: boolean;
       endpoint: string;
       models: Array<{
@@ -196,7 +204,7 @@ const api = {
     return () => ipcRenderer.removeListener(IPC.browserHistory, listener);
   },
 
-  startAgent: (request: { endpoint: string; modelId: string; sessionPath?: string }) =>
+  startAgent: (request: LocalModelSelection & { sessionPath?: string }) =>
     ipcRenderer.invoke(
       IPC.agentStart,
       request
@@ -204,7 +212,7 @@ const api = {
 
   attachAgent: (sessionPath: string) =>
     ipcRenderer.invoke(IPC.agentAttach, sessionPath) as Promise<
-      ActionResult & { agentId?: number; status?: AgentStatus }
+      ActionResult & { agentId?: number; status?: AgentStatus; model?: LocalModelSelection; credentialsChanged?: boolean }
     >,
 
   deleteAgentSession: (sessionPath: string) =>

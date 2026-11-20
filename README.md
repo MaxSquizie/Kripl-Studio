@@ -1,6 +1,6 @@
 # Kripl Studio
 
-A Windows desktop workspace for agentic coding that is **local-model-first, network-capable, and offline-capable**. The agent runs on [Pi](https://github.com/earendil-works/pi) behind an isolated RPC adapter; inference runs against a local OpenAI-compatible server (LM Studio, llama.cpp, or similar). Browser search, documentation lookup, GitHub, package registries, and other network tools remain available when the policy allows — and everything keeps working when they don't.
+A Windows desktop workspace for agentic coding that is **local-model-first, network-capable, and offline-capable**. The agent runs on [Pi](https://github.com/earendil-works/pi) behind an isolated RPC adapter; inference runs against a local OpenAI-compatible server (LM Studio, Unsloth Studio, llama.cpp, or similar). Browser search, documentation lookup, GitHub, package registries, and other network tools remain available when the policy allows — and everything keeps working when they don't.
 
 ## Design principles
 
@@ -37,6 +37,7 @@ A Windows desktop workspace for agentic coding that is **local-model-first, netw
 
 **Model provider**
 - Discovery of local OpenAI-compatible servers on loopback endpoints; model list with context-window sizes.
+- LM Studio and Unsloth profiles with separate addresses, model selections, and optional API keys.
 - Model tuning per run: system prompt and temperature.
 - Context inspector showing what the agent currently sees.
 
@@ -67,6 +68,23 @@ AGENTS.md             Development rules for AI-assisted contributions
 
 Architectural boundaries are enforced by convention and review: `@kripl/core` holds contracts only; `pi-adapter` never imports UI code; renderer code never imports `@earendil-works/pi-*`. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
 
+## Connecting a model server
+
+Open **Settings → Model**, select the server, enter its address, and press **Connect**.
+
+| Server | Default address | Preparation |
+| --- | --- | --- |
+| LM Studio | `http://127.0.0.1:1234/v1` | Load a chat model and enable its local server. |
+| Unsloth | `http://127.0.0.1:8888/v1` | Load a chat model and create an API key in Unsloth **Settings → API**. |
+
+Use the port shown by your server; it can differ from these defaults. For Unsloth, paste the key into Kripl's **API key** field before connecting. A blank field reuses the saved key. If keyless inference was explicitly enabled in Unsloth, a saved key is optional. When the server reports loading status, Kripl lists its loaded chat models and excludes downloaded-only and media models.
+
+Each profile remembers its own address and model. API keys are scoped to the selected server and address, encrypted using the operating system's credential protection, and passed to Pi through its private process environment. If operating-system encryption is unavailable, the key is kept for the current application session. The saved key is never returned to the renderer. After changing a running chat's server, model, or key, use **Reconnect chat** once its current response has finished or been stopped.
+
+Unsloth uses the existing OpenAI-compatible transport for streaming, reasoning, images, and client tool calls. Kripl sends `enable_tools: false` so Pi handles tool execution and permissions. If launching Unsloth with `unsloth run`, use `--disable-tools`; an explicit `--enable-tools` can override the request setting. Each Pi runtime has its own configuration directory, so changing the foreground connection does not change a background runtime's endpoint or key.
+
+Protocol references: [Unsloth API](https://unsloth.ai/docs/basics/api), [OpenAI-compatible SDK examples](https://unsloth.ai/docs/integrations/connect-python-sdk-to-unsloth), and [Electron credential encryption](https://www.electronjs.org/docs/latest/api/safe-storage).
+
 ## Development
 
 Requirements:
@@ -74,7 +92,7 @@ Requirements:
 - Node.js 22.19 or newer
 - Windows 11 as the primary desktop target
 - Git for Windows / Git Bash for Bash-based Pi tools
-- A local OpenAI-compatible model server (e.g. LM Studio) to use the agent
+- A local OpenAI-compatible model server (e.g. LM Studio or Unsloth Studio) to use the agent
 
 ```powershell
 git clone https://github.com/MaxSquizie/Kripl-Studio.git

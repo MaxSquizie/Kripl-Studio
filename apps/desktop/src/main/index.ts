@@ -1,4 +1,4 @@
-import type { AgentEvent, AttachedFile, AgentInteractionResponse, AgentSessionInfo, AgentSessionSearchHit, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
+import type { AgentEvent, AttachedFile, AgentInteractionResponse, AgentSessionInfo, AgentSessionSearchHit, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, BrowserHistoryEntry, BrowserState, ContextInspectorSnapshot, DesktopBootstrapState, DesktopRuntimeSettings, DesktopUiState, LocalModelCredentialStatus, LocalModelSelection, MemoryItem, RecentProject, TerminalEvent, TerminalSessionInfo, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceDiff, WorkspaceEntry, WorkspaceFilePreview, WorkspaceFileSearchResult, WorkspaceGitStatus, WorkspaceTextSearchResult } from "@kripl/core";
 import { JsonDesktopStateStore } from "@kripl/app-state";
 import { InspectableContextRuntime } from "@kripl/context-runtime";
 import { LocalOpenAIProvider } from "@kripl/local-openai-provider";
@@ -10,13 +10,16 @@ import {
 } from "@kripl/pi-adapter";
 import { PtyTerminalRuntime } from "@kripl/terminal";
 import { LocalWorkspaceRuntime } from "@kripl/workspace";
-import { app, BrowserWindow, crashReporter, dialog, ipcMain, nativeImage, screen, Tray } from "electron";
+import { app, BrowserWindow, crashReporter, dialog, ipcMain, nativeImage, safeStorage, screen, Tray } from "electron";
 import { autoUpdater } from "electron-updater";
-import { appendFile, copyFile, mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserRuntime } from "./browser-runtime.js";
 import { ToolBridgeServer } from "./tool-bridge.js";
+import { LocalModelCredentialStore, localModelConnectionKey, parseLocalModelConnection } from "./local-model-credentials.js";
+import { generateLocalSessionTitle as generateSessionTitle, resolveLocalModel, type ConnectedLocalModel } from "./local-model-requests.js";
+import { AgentOperationQueue } from "./agent-operation-queue.js";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 
@@ -66,6 +69,8 @@ const IPC = {
   workspaceGitStatus: "kripl:workspace-git-status",
   workspaceCommit: "kripl:workspace-commit",
   probeLocalModels: "kripl:probe-local-models",
+  localModelCredentialStatus: "kripl:local-model-credential-status",
+  localModelApiKey: "kripl:local-model-api-key",
   diagLog: "kripl:diag-log",
   agentSessions: "kripl:agent-sessions",
   agentStart: "kripl:agent-start",
@@ -103,10 +108,12 @@ const IPC = {
   terminalEvent: "kripl:terminal-event"
 } as const;
 
-interface AgentStartRequest {
-  endpoint: string;
-  modelId: string;
+interface AgentStartRequest extends LocalModelSelection {
   sessionPath?: string;
+}
+
+interface ActiveLocalModel extends ConnectedLocalModel {
+  credentialsChanged?: boolean;
 }
 
 interface ActionResult {
@@ -117,7 +124,7 @@ interface ActionResult {
 let activeAgent: PiAgentRuntime | undefined;
 let activeAgentUnsubscribe: (() => void) | undefined;
 let activeAgentStatus: AgentStatus = "idle";
-let activeAgentModel: { endpoint: string; modelId: string } | undefined;
+let activeAgentModel: ActiveLocalModel | undefined;
 // Workspace the active agent runs in (for live-project indicators).
 let activeAgentWorkspace: string | undefined;
 
@@ -125,7 +132,7 @@ let activeAgentWorkspace: string | undefined;
 // different chat or project. Keyed by runtime id.
 interface BackgroundAgentSlot {
   agent: PiAgentRuntime;
-  model?: { endpoint: string; modelId: string };
+  model?: ActiveLocalModel;
   // Workspace the run belongs to (may differ after a project switch).
   workspacePath?: string;
   status: AgentStatus;
@@ -136,6 +143,8 @@ const backgroundAgents = new Map<number, BackgroundAgentSlot>();
 // Stable id per runtime so the renderer can ignore events from other agents.
 let nextAgentId = 1;
 const agentIds = new Map<PiAgentRuntime, number>();
+const agentDirectories = new WeakMap<PiAgentRuntime, string>();
+const agentOperations = new AgentOperationQueue();
 function agentIdOf(agent: PiAgentRuntime): number {
   let id = agentIds.get(agent);
   if (id === undefined) {
@@ -163,6 +172,43 @@ const contextRuntime = new InspectableContextRuntime({ maxEvents: 120 });
 const workspaceRuntime = new LocalWorkspaceRuntime();
 const terminalRuntime = new PtyTerminalRuntime();
 let desktopStateStore: JsonDesktopStateStore | undefined;
+let localModelCredentials: LocalModelCredentialStore | undefined;
+
+function requireLocalModelCredentials(): LocalModelCredentialStore {
+  return localModelCredentials ??= new LocalModelCredentialStore(
+    join(app.getPath("userData"), "local-model-credentials.json"),
+    {
+      available: async () => {
+        if (!(await safeStorage.isAsyncEncryptionAvailable())) return false;
+        return process.platform !== "linux" || (
+          safeStorage.isEncryptionAvailable() &&
+          ["gnome_libsecret", "kwallet", "kwallet5", "kwallet6"].includes(safeStorage.getSelectedStorageBackend())
+        );
+      },
+      encrypt: (value) => safeStorage.encryptStringAsync(value),
+      decrypt: async (value) => (await safeStorage.decryptStringAsync(value)).result
+    }
+  );
+}
+
+function agentConnectionDetails(model: ActiveLocalModel | undefined): {
+  model?: LocalModelSelection;
+  credentialsChanged?: boolean;
+} {
+  return model ? {
+    model: { server: model.server, endpoint: model.endpoint, modelId: model.modelId },
+    credentialsChanged: model.credentialsChanged === true
+  } : {};
+}
+
+async function disposeAgentRuntime(agent: PiAgentRuntime): Promise<void> {
+  await agent.dispose();
+  const directory = agentDirectories.get(agent);
+  if (directory) {
+    agentDirectories.delete(agent);
+    await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
 
 
 function emptyBrowserState(): BrowserState {
@@ -379,44 +425,6 @@ async function listWorkspaceSessions(workspacePath: string): Promise<AgentSessio
   });
 }
 
-async function generateSessionTitle(
-  model: { endpoint: string; modelId: string },
-  firstMessage: string
-): Promise<string | undefined> {
-  try {
-    const response = await fetch(`${model.endpoint}/chat/completions`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        model: model.modelId,
-        max_tokens: 24,
-        temperature: 0,
-        messages: [
-          {
-            role: "user",
-            content:
-              "Create a very short topic title (maximum 5 words) for a coding chat that starts with this request. Reply with the title only, without quotes or punctuation at the end.\n\nRequest:\n" +
-              firstMessage.slice(0, 600)
-          }
-        ]
-      }),
-      signal: AbortSignal.timeout(15_000)
-    });
-    if (!response.ok) return undefined;
-    const payload = (await response.json()) as {
-      choices?: Array<{ message?: { content?: unknown } }>;
-    };
-    const raw = payload.choices?.[0]?.message?.content;
-    const title =
-      typeof raw === "string"
-        ? raw.replace(/^[\"'\u201c\u201d\s]+|[\"'\u201c\u201d.!?\s]+$/g, "").trim().slice(0, 80)
-        : undefined;
-    return title || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 const namingAgents = new WeakSet<PiAgentRuntime>();
 
 async function autoNameActiveSession(): Promise<void> {
@@ -587,6 +595,7 @@ function isAgentStartRequest(value: unknown): value is AgentStartRequest {
     typeof record.endpoint === "string" &&
     record.endpoint.length > 0 &&
     record.endpoint.length <= 2_048 &&
+    (record.server === undefined || record.server === "lm-studio" || record.server === "unsloth") &&
     typeof record.modelId === "string" &&
     record.modelId.length > 0 &&
     record.modelId.length <= 512 &&
@@ -595,24 +604,6 @@ function isAgentStartRequest(value: unknown): value is AgentStartRequest {
         record.sessionPath.length > 0 &&
         record.sessionPath.length <= 32_768))
   );
-}
-
-async function validateLocalModel(endpoint: string, modelId: string) {
-  const provider = new LocalOpenAIProvider({
-    baseUrl: endpoint,
-    requestTimeoutMs: 2_500
-  });
-  const models = await provider.listModels();
-  const selected = models.find((model) => model.id === modelId);
-
-  if (!selected) {
-    throw new Error(`Local model "${modelId}" is no longer available from the selected endpoint.`);
-  }
-
-  return {
-    endpoint: provider.baseUrl,
-    modelId: selected.id
-  };
 }
 
 async function disposeActiveAgent(): Promise<void> {
@@ -629,7 +620,7 @@ async function disposeActiveAgent(): Promise<void> {
 
   if (agent) {
     agentIds.delete(agent);
-    await agent.dispose();
+    await disposeAgentRuntime(agent);
   }
   broadcastLiveAgents();
 }
@@ -640,7 +631,7 @@ function disposeBackgroundAgent(id: number): void {
   backgroundAgents.delete(id);
   slot.unsubscribe();
   agentIds.delete(slot.agent);
-  void slot.agent.dispose().catch(() => {});
+  void disposeAgentRuntime(slot.agent).catch(() => {});
   broadcastLiveAgents();
 }
 
@@ -1432,22 +1423,49 @@ function registerIpc(): void {
     }
   );
 
-  ipcMain.handle(IPC.probeLocalModels, async (_event, endpoint: unknown) => {
-    if (typeof endpoint !== "string" || endpoint.length > 2048) {
-      return { ok: false, endpoint: "", models: [], error: "Invalid local model endpoint." };
-    }
-
+  ipcMain.handle(IPC.localModelCredentialStatus, async (_event, value: unknown): Promise<LocalModelCredentialStatus> => {
     try {
-      const provider = new LocalOpenAIProvider({ baseUrl: endpoint, requestTimeoutMs: 2_500 });
+      return await requireLocalModelCredentials().status(parseLocalModelConnection(value));
+    } catch (error) {
+      return { ...actionError(error), hasApiKey: false, persistent: false };
+    }
+  });
+
+  ipcMain.handle(IPC.localModelApiKey, async (_event, value: unknown, apiKey: unknown): Promise<LocalModelCredentialStatus> => {
+    try {
+      const connection = parseLocalModelConnection(value);
+      if (typeof apiKey !== "string") throw new Error("Invalid API key.");
+      const credentials = requireLocalModelCredentials();
+      const result = await credentials.set(connection, apiKey);
+      const storedKey = await credentials.get(connection);
+      const id = localModelConnectionKey(connection);
+      const models = [activeAgentModel, ...[...backgroundAgents.values()].map((slot) => slot.model)];
+      for (const model of models) {
+        if (model && localModelConnectionKey(model) === id) {
+          model.credentialsChanged = model.apiKey !== storedKey;
+        }
+      }
+      return result;
+    } catch (error) {
+      return { ...actionError(error), hasApiKey: false, persistent: false };
+    }
+  });
+
+  ipcMain.handle(IPC.probeLocalModels, async (_event, value: unknown) => {
+    let endpoint = "";
+    try {
+      const connection = parseLocalModelConnection(value);
+      endpoint = connection.endpoint;
+      const apiKey = await requireLocalModelCredentials().get(connection);
+      const provider = new LocalOpenAIProvider({
+        baseUrl: endpoint,
+        server: connection.server,
+        ...(apiKey ? { apiKey } : {})
+      });
       const models = await provider.listModels();
       return { ok: true, endpoint: provider.baseUrl, models };
     } catch (error) {
-      return {
-        ok: false,
-        endpoint,
-        models: [],
-        error: error instanceof Error ? error.message : String(error)
-      };
+      return { ...actionError(error), endpoint, models: [] };
     }
   });
 
@@ -1456,17 +1474,18 @@ function registerIpc(): void {
     async (
       event,
       request: unknown
-    ): Promise<ActionResult & { agentId?: number; status?: AgentStatus }> => {
+    ): Promise<ActionResult & { agentId?: number; status?: AgentStatus }> => agentOperations.run(async () => {
     if (!isAgentStartRequest(request)) {
       return { ok: false, error: "Invalid agent start request." };
     }
 
+    let startedAgent: PiAgentRuntime | undefined;
     try {
       const workspace = workspaceRuntime.descriptor();
       if (!workspace) {
         throw new Error("Open a workspace before starting the agent.");
       }
-      const localModel = await validateLocalModel(request.endpoint, request.modelId);
+      const localModel = await resolveLocalModel(request, request.modelId, requireLocalModelCredentials());
       const sessionPath = await validatedSessionPath(workspace.path, request.sessionPath);
 
       // A running agent keeps working in the background unless we are
@@ -1494,13 +1513,17 @@ function registerIpc(): void {
         runtimeSettings.networkMode
       );
 
-      const userData = app.getPath("userData");
+      const runtimeRoot = join(app.getPath("userData"), "pi-runtimes");
+      await mkdir(runtimeRoot, { recursive: true, mode: 0o700 });
+      const agentDir = await mkdtemp(join(runtimeRoot, "agent-"));
       const agent = new PiAgentRuntime({
-        agentDir: join(userData, "pi-agent"),
+        agentDir,
         sessionDir: piSessionDir(),
         localModel: {
           baseUrl: localModel.endpoint,
           modelId: localModel.modelId,
+          server: localModel.server,
+          ...(localModel.apiKey ? { apiKey: localModel.apiKey } : {}),
           ...(runtimeSettings.modelTuning?.temperature !== undefined
             ? { temperature: runtimeSettings.modelTuning.temperature }
             : {})
@@ -1513,8 +1536,11 @@ function registerIpc(): void {
         toolBridge
       });
 
+      startedAgent = agent;
+      agentDirectories.set(agent, agentDir);
+      const credentialsChanged = localModel.apiKey !== await requireLocalModelCredentials().get(localModel);
       activeAgent = agent;
-      activeAgentModel = { endpoint: localModel.endpoint, modelId: localModel.modelId };
+      activeAgentModel = { ...localModel, credentialsChanged };
       activeAgentWorkspace = workspace.path;
       activeAgentStatus = "starting";
       const agentId = agentIdOf(agent);
@@ -1537,10 +1563,11 @@ function registerIpc(): void {
       await rememberActiveAgentSession();
       return { ok: true, agentId };
     } catch (error) {
-      await disposeActiveAgent();
+      if (startedAgent && activeAgent === startedAgent) await disposeActiveAgent();
+      else if (startedAgent) await disposeAgentRuntime(startedAgent);
       return actionError(error);
     }
-  });
+  }));
 
   // Rebind the UI to an agent that is still running in the background.
   ipcMain.handle(
@@ -1548,7 +1575,7 @@ function registerIpc(): void {
     async (
       _event,
       sessionPath: unknown
-    ): Promise<ActionResult & { agentId?: number; status?: AgentStatus }> => {
+    ): Promise<ActionResult & { agentId?: number; status?: AgentStatus; model?: LocalModelSelection; credentialsChanged?: boolean }> => agentOperations.run(async () => {
       if (typeof sessionPath !== "string" || !sessionPath) {
         return { ok: false, error: "Invalid session path." };
       }
@@ -1557,20 +1584,20 @@ function registerIpc(): void {
       const activeFile = activeAgent ? await liveSessionFile(activeAgent) : null;
       if (activeAgent && activeFile === sessionPath) {
         diagMain(`attach hit active in ${Date.now() - t0}ms`);
-        return { ok: true, agentId: agentIdOf(activeAgent), status: activeAgentStatus };
+        return { ok: true, agentId: agentIdOf(activeAgent), status: activeAgentStatus, ...agentConnectionDetails(activeAgentModel) };
       }
       for (const [id, slot] of [...backgroundAgents.entries()]) {
         const file = await liveSessionFile(slot.agent);
         if (file !== sessionPath) continue;
         promoteBackgroundAgent(id);
         diagMain(`attach hit background id=${id} in ${Date.now() - t0}ms`);
-        return { ok: true, agentId: id, status: activeAgentStatus };
+        return { ok: true, agentId: id, status: activeAgentStatus, ...agentConnectionDetails(activeAgentModel) };
       }
       diagMain(
         `attach miss (no runtime) in ${Date.now() - t0}ms — renderer will start a fresh agent`
       );
       return { ok: false, error: "No running agent for this chat." };
-    }
+    })
   );
 
   ipcMain.handle(IPC.agentLiveSessions, async (): Promise<
@@ -1618,6 +1645,9 @@ function registerIpc(): void {
     }
     if (activeAgentStatus !== "ready") {
       return { ok: false, error: `Pi agent is not ready (status: ${activeAgentStatus}).` };
+    }
+    if (activeAgentModel?.credentialsChanged) {
+      return { ok: false, error: "The API key changed. Reconnect this chat to use the updated key." };
     }
 
     try {

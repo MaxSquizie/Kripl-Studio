@@ -1,10 +1,12 @@
-import type { AgentEvent, AttachedFile, AgentInteractionRequest, AgentInteractionResponse, AgentSessionSearchHit, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, ContextInspectorSnapshot, DesktopRuntimeSettings, DesktopUiState, RecentProject, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceEntry, WorkspaceFilePreview, WorkspaceGitStatus } from "@kripl/core";
+import type { AgentEvent, AttachedFile, AgentInteractionRequest, AgentInteractionResponse, AgentSessionSearchHit, AgentSessionSnapshot, AgentSessionSummary, AgentStatus, ContextInspectorSnapshot, DesktopRuntimeSettings, DesktopUiState, LocalModelConnection, LocalModelServer, RecentProject, WorkspaceChange, WorkspaceCommitResult, WorkspaceDescriptor, WorkspaceEntry, WorkspaceFilePreview, WorkspaceGitStatus } from "@kripl/core";
 import { cleanAssistantToolText } from "@kripl/core";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChatTranscript } from "./ChatTranscript";
 import { SettingsDialog } from "./SettingsDialog";
 import { createAgentEventBuffer } from "./agent-event-buffer";
 import { createAttachEventCollector } from "./attach-event-collector";
+import { DEFAULT_LOCAL_MODEL_ENDPOINTS, loadLocalModelProfiles, sameLocalModelConnection, saveLocalModelProfiles } from "./local-model-profiles";
+import type { LocalModelProfile, LocalModelProfiles } from "./local-model-profiles";
 import { toolPayloadPreview } from "./tool-payload-preview";
 import { useLatestCallback } from "./useLatestCallback";
 import type { FeedItem, MessageItem, ReasoningBlock, ReasoningStep, ToolItem } from "./chat-types";
@@ -230,8 +232,10 @@ interface LocalModel {
 interface AgentBinding {
   workspacePath: string;
   endpoint: string;
+  server?: LocalModelServer;
   modelId: string;
   sessionPath: string;
+  credentialsChanged?: boolean;
   // Runtime id of the live agent process (background agents keep their own).
   agentId?: number;
 }
@@ -241,8 +245,6 @@ type ProbeState =
   | { status: "checking"; models: LocalModel[] }
   | { status: "ready"; models: LocalModel[] }
   | { status: "error"; models: LocalModel[]; message: string };
-
-const DEFAULT_LOCAL_ENDPOINT = "http://127.0.0.1:1234/v1";
 
 function basename(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
@@ -319,9 +321,15 @@ export function App() {
   const [runtimeSettings, setRuntimeSettings] = useState<DesktopRuntimeSettings | null>(null);
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [contextSnapshot, setContextSnapshot] = useState<ContextInspectorSnapshot | null>(null);
-  const [endpoint, setEndpoint] = useState(() => readStored("kripl.localEndpoint", DEFAULT_LOCAL_ENDPOINT));
+  const [modelProfiles, setModelProfiles] = useState(() => loadLocalModelProfiles({
+    getItem: (key) => readStored(key, "") || null
+  }));
+  const modelProfilesRef = useRef(modelProfiles);
+  const server = modelProfiles.server;
+  const { endpoint, modelId: selectedModel } = modelProfiles.profiles[server];
+  const connectionSeqRef = useRef(0);
+  const probeSeqRef = useRef(0);
   const [probe, setProbe] = useState<ProbeState>({ status: "idle", models: [] });
-  const [selectedModel, setSelectedModel] = useState(() => readStored("kripl.selectedModel", ""));
   const [agentStatus, setAgentStatus] = useState<AgentStatus>("idle");
   // Mirrored for async waits (e.g. interrupt-then-resend while generating).
   const agentStatusRef = useRef(agentStatus);
@@ -593,12 +601,8 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    writeStored("kripl.localEndpoint", endpoint);
-  }, [endpoint]);
-
-  useEffect(() => {
-    if (selectedModel) writeStored("kripl.selectedModel", selectedModel);
-  }, [selectedModel]);
+    saveLocalModelProfiles({ setItem: writeStored }, modelProfiles);
+  }, [modelProfiles]);
 
   useEffect(() => {
     writeStored("kripl.contextWindow", contextWindowOverride ? String(contextWindowOverride) : "");
@@ -986,13 +990,15 @@ export function App() {
     probe.models.some((model) => model.id === selectedModel);
 
   const bindingMatchesSelection =
-    Boolean(binding) &&
-    binding?.workspacePath === workspace?.path &&
-    binding?.endpoint === endpoint &&
-    binding?.modelId === selectedModel;
+    binding !== null &&
+    binding.workspacePath === workspace?.path &&
+    sameLocalModelConnection(binding, { server, endpoint }) &&
+    binding.modelId === selectedModel &&
+    !binding.credentialsChanged;
 
   const canStartAgent = Boolean(workspace && modelReady) && agentStatus !== "starting";
   const canSend = bindingMatchesSelection && agentStatus === "ready";
+  const reconnectModel = Boolean(binding && binding.workspacePath === workspace?.path && modelReady && !bindingMatchesSelection);
 
   const selectedModelInfo = probe.models.find((model) => model.id === selectedModel);
   // No silent 32k fallback: if neither the override nor the server reports a
@@ -1095,7 +1101,7 @@ export function App() {
   const autoStartedWorkspaces = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!workspace || !modelReady) return;
+    if (!workspace || !modelReady || settingsOpen) return;
     if (autoStartedWorkspaces.current.has(workspace.path)) return;
     // Crash-reload backstop: the in-memory set above resets on every renderer
     // reload, so a fatal auto-resume would otherwise repeat forever. Remember
@@ -1129,7 +1135,7 @@ export function App() {
     }
     const saved = loadSavedBindings()[workspace.path];
     // A stale server/model selection must not auto-start the wrong runtime.
-    if (saved && (saved.endpoint !== endpoint || saved.modelId !== selectedModel)) {
+    if (saved && (!sameLocalModelConnection(saved, { server, endpoint }) || saved.modelId !== selectedModel)) {
       diag("autoStart skipped", { reason: "model mismatch" });
       return;
     }
@@ -1140,7 +1146,7 @@ export function App() {
     diag("autoStart firing", { sessionPath: saved?.sessionPath ?? null });
     if (saved?.sessionPath) void resumeSession(saved.sessionPath);
     else void startAgent();
-  }, [workspace, modelReady, agentStatus, binding]);
+  }, [workspace, modelReady, agentStatus, binding, settingsOpen, server, endpoint, selectedModel]);
 
   const dirtyEditorPaths = useMemo(() => {
     const dirty = new Set<string>();
@@ -1707,29 +1713,89 @@ export function App() {
     await window.kripl.retrieveMemory(query);
   }
 
-  async function probeModels() {
-    setProbe((current) => ({ status: "checking", models: current.models }));
-    const result = await window.kripl.probeLocalModels(endpoint);
+  function updateModelProfiles(next: LocalModelProfiles): void {
+    modelProfilesRef.current = next;
+    setModelProfiles(next);
+  }
 
-    if (!result.ok) {
-      setProbe({ status: "error", models: [], message: result.error ?? "Local model probe failed." });
-      setSelectedModel("");
-      pushToast("error", result.error ?? "Local model server unreachable");
-      return;
-    }
-
-    setEndpoint(result.endpoint);
-    setProbe({ status: "ready", models: result.models });
-    pushToast(
-      "success",
-      result.models.length > 0
-        ? `${result.models.length} local model(s) found`
-        : "Local server reachable, no loaded models"
-    );
-    setSelectedModel((current) => {
-      if (result.models.some((model) => model.id === current)) return current;
-      return result.models[0]?.id ?? "";
+  function updateSelectedProfile(patch: Partial<LocalModelProfile>): void {
+    const current = modelProfilesRef.current;
+    updateModelProfiles({
+      ...current,
+      profiles: {
+        ...current.profiles,
+        [current.server]: { ...current.profiles[current.server], ...patch }
+      }
     });
+  }
+
+  function invalidateModelConnection(resetProbe = true): void {
+    connectionSeqRef.current += 1;
+    probeSeqRef.current += 1;
+    resumingPathsRef.current.clear();
+    if (resetProbe) setProbe({ status: "idle", models: [] });
+    if (agentStatus === "starting") setAgentStatus("idle");
+  }
+
+  function changeModelServer(value: LocalModelServer): void {
+    if (modelProfilesRef.current.server === value) return;
+    invalidateModelConnection();
+    updateModelProfiles({ ...modelProfilesRef.current, server: value });
+  }
+
+  function changeModelEndpoint(value: string): void {
+    if (modelProfilesRef.current.profiles[modelProfilesRef.current.server].endpoint === value) return;
+    invalidateModelConnection();
+    updateSelectedProfile({ endpoint: value });
+  }
+
+  function changeSelectedModel(value: string): void {
+    if (modelProfilesRef.current.profiles[modelProfilesRef.current.server].modelId === value) return;
+    invalidateModelConnection(false);
+    updateSelectedProfile({ modelId: value });
+  }
+
+  function modelCredentialsChanged(connection: LocalModelConnection): void {
+    const current = modelProfilesRef.current;
+    const selectedConnection = { server: current.server, endpoint: current.profiles[current.server].endpoint };
+    if (sameLocalModelConnection(connection, selectedConnection)) invalidateModelConnection();
+    setBinding((currentBinding) => currentBinding && sameLocalModelConnection(connection, currentBinding)
+      ? { ...currentBinding, credentialsChanged: true }
+      : currentBinding);
+  }
+
+  async function probeModels() {
+    const seq = ++probeSeqRef.current;
+    const current = modelProfilesRef.current;
+    const connection = { server: current.server, endpoint: current.profiles[current.server].endpoint };
+    setProbe({ status: "checking", models: [] });
+    try {
+      const result = await window.kripl.probeLocalModels(connection);
+      if (probeSeqRef.current !== seq) return;
+      if (!result.ok) {
+        setProbe({ status: "error", models: [], message: result.error ?? "Local model probe failed." });
+        pushToast("error", result.error ?? "Local model server unreachable");
+        return;
+      }
+
+      const selected = modelProfilesRef.current.profiles[connection.server].modelId;
+      updateSelectedProfile({
+        endpoint: result.endpoint,
+        modelId: result.models.some((model) => model.id === selected) ? selected : result.models[0]?.id ?? ""
+      });
+      setProbe({ status: "ready", models: result.models });
+      pushToast(
+        "success",
+        result.models.length > 0
+          ? `${result.models.length} local model(s) found`
+          : "Local server reachable, no loaded models"
+      );
+    } catch (error) {
+      if (probeSeqRef.current !== seq) return;
+      const message = error instanceof Error ? error.message : "Local model probe failed.";
+      setProbe({ status: "error", models: [], message });
+      pushToast("error", message);
+    }
   }
 
   async function startAgent(resumeSessionPath?: string) {
@@ -1745,6 +1811,8 @@ export function App() {
       return;
     }
     const seq = ++switchSeqRef.current;
+    const connectionSeq = connectionSeqRef.current;
+    const stale = () => switchSeqRef.current !== seq || connectionSeqRef.current !== connectionSeq;
     bindingAgentIdRef.current = null;
     setBinding(null);
     setEditingMessageId(null);
@@ -1774,11 +1842,12 @@ export function App() {
     diag("startAgent ipc begin", { sessionPath: resumeSessionPath ?? null });
     const result = await window.kripl.startAgent({
       endpoint,
+      server,
       modelId: selectedModel,
       ...(resumeSessionPath ? { sessionPath: resumeSessionPath } : {})
     });
     // A newer workspace switch won while we were starting — drop the result.
-    if (switchSeqRef.current !== seq) return;
+    if (stale()) return;
     diag("startAgent ipc done", {
       ok: result.ok,
       error: result.error ?? null,
@@ -1800,7 +1869,7 @@ export function App() {
         diag("startAgent snapshot failed", { error: String(error) });
         return null;
       });
-    if (switchSeqRef.current !== seq) return;
+    if (stale()) return;
     if (snapshot) {
       diag("startAgent snapshot fetched", {
         messages: snapshot.messageCount,
@@ -1812,6 +1881,7 @@ export function App() {
     const nextBinding: AgentBinding = {
       workspacePath: workspace.path,
       endpoint,
+      server,
       modelId: selectedModel,
       sessionPath: resumeSessionPath ?? "",
       ...(typeof result.agentId === "number" ? { agentId: result.agentId } : {})
@@ -1833,8 +1903,8 @@ export function App() {
       diag("resumeSession deduped (already opening)", { sessionPath });
       return inFlight.promise;
     }
-    const run = doResumeSession(sessionPath).finally(() => {
-      resumingPathsRef.current.delete(sessionPath);
+    const run: Promise<void> = doResumeSession(sessionPath).finally(() => {
+      if (resumingPathsRef.current.get(sessionPath)?.promise === run) resumingPathsRef.current.delete(sessionPath);
     });
     resumingPathsRef.current.set(sessionPath, { promise: run, at: Date.now() });
     return run;
@@ -1853,6 +1923,8 @@ export function App() {
       return;
     }
     const seq = ++switchSeqRef.current;
+    const connectionSeq = connectionSeqRef.current;
+    const stale = () => switchSeqRef.current !== seq || connectionSeqRef.current !== connectionSeq;
     bindingAgentIdRef.current = null;
     setBinding(null);
     setEditingMessageId(null);
@@ -1884,7 +1956,7 @@ export function App() {
     });
     try {
       const attached = await window.kripl.attachAgent(sessionPath);
-      if (switchSeqRef.current !== seq) return;
+      if (stale()) return;
       diag("attach result", {
         ok: attached.ok,
         agentId: attached.agentId,
@@ -1897,12 +1969,12 @@ export function App() {
         const statusBeforeSnapshot = latestStatus();
         const tSnap = Date.now();
         let snapshot = await window.kripl.getAgentSessionSnapshot();
-        if (switchSeqRef.current !== seq) return;
+        if (stale()) return;
         if ((statusBeforeSnapshot === "running" || statusBeforeSnapshot === "stopping") &&
             latestStatus() === "ready") {
           // A completed message may have been persisted after the first read.
           snapshot = await window.kripl.getAgentSessionSnapshot();
-          if (switchSeqRef.current !== seq) return;
+          if (stale()) return;
         }
         if (!snapshot) throw new Error("The active session changed while opening. Select the chat again.");
         diag("snapshot fetched", {
@@ -1917,8 +1989,10 @@ export function App() {
         reconcileTranscriptOnReadyRef.current = status === "running" || status === "stopping";
         const nextBinding: AgentBinding = {
           workspacePath: workspace.path,
-          endpoint,
-          modelId: selectedModel,
+          endpoint: attached.model?.endpoint ?? endpoint,
+          server: attached.model ? attached.model.server ?? "lm-studio" : server,
+          modelId: attached.model?.modelId ?? selectedModel,
+          credentialsChanged: attached.credentialsChanged === true,
           sessionPath,
           agentId: targetId
         };
@@ -1934,7 +2008,7 @@ export function App() {
         return;
       }
     } catch (error) {
-      if (switchSeqRef.current === seq) {
+      if (!stale()) {
         setAgentStatus("error");
         setAgentError(error instanceof Error ? error.message : String(error));
       }
@@ -2422,6 +2496,14 @@ export function App() {
   const unstageWorkspaceChangeAction = useLatestCallback(unstageWorkspaceChange);
   const revertWorkspaceChangeAction = useLatestCallback(revertWorkspaceChange);
   const probeModelsAction = useLatestCallback(probeModels);
+  const changeModelServerAction = useLatestCallback(changeModelServer);
+  const changeModelEndpointAction = useLatestCallback(changeModelEndpoint);
+  const changeSelectedModelAction = useLatestCallback(changeSelectedModel);
+  const modelCredentialsChangedAction = useLatestCallback(modelCredentialsChanged);
+  const reconnectModelAction = useLatestCallback(() => {
+    if (!binding || agentStatus === "running" || agentStatus === "stopping") return;
+    void startAgent(binding.sessionPath || undefined);
+  });
   const retrieveMemoryAction = useLatestCallback(retrieveMemory);
   const commitWorkspaceChangesAction = useLatestCallback(commitWorkspaceChanges);
   const applyRuntimeSettingsAction = useLatestCallback(async (next: DesktopRuntimeSettings) => {
@@ -2826,6 +2908,12 @@ export function App() {
           </div>
 
           <div className="composer">
+            {reconnectModel && <div className="model-connection-notice" role="status">
+              <span>{agentStatus === "running" || agentStatus === "stopping"
+                ? "The current reply is still using the previous connection. Reconnect after it finishes."
+                : "Reconnect this chat to use the selected model and current API key."}</span>
+              <button type="button" onClick={reconnectModelAction} disabled={!canStartAgent || agentStatus === "running" || agentStatus === "stopping"}>Reconnect chat</button>
+            </div>}
             {attachments.length > 0 && (
               <>
                 {pdfPreviewPath && attachmentPreviews[pdfPreviewPath] ? (
@@ -3050,13 +3138,16 @@ export function App() {
 
       {settingsOpen && (
         <SettingsDialog
+          server={server}
+          onServerChange={changeModelServerAction}
           endpoint={endpoint}
-          onEndpointChange={setEndpoint}
-          defaultEndpoint={DEFAULT_LOCAL_ENDPOINT}
+          onEndpointChange={changeModelEndpointAction}
+          onCredentialsChanged={modelCredentialsChangedAction}
+          defaultEndpoint={DEFAULT_LOCAL_MODEL_ENDPOINTS[server]}
           probe={probe}
           onProbe={probeModelsAction}
           selectedModel={selectedModel}
-          onModelChange={setSelectedModel}
+          onModelChange={changeSelectedModelAction}
           contextWindowOverride={contextWindowOverride}
           onContextWindowOverrideChange={setContextWindowOverride}
           defaultContextWindow={DEFAULT_CONTEXT_WINDOW}

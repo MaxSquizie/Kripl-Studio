@@ -2,6 +2,9 @@ import { memo } from "react";
 import type {
   ContextInspectorSnapshot,
   DesktopRuntimeSettings,
+  LocalModelConnection,
+  LocalModelCredentialStatus,
+  LocalModelServer,
   ModelDescriptor,
   WorkspaceCommitResult,
   WorkspaceDescriptor,
@@ -19,8 +22,11 @@ export type SettingsModelProbe =
   | { status: "error"; models: ModelDescriptor[]; message: string };
 
 export interface SettingsDialogProps {
+  server: LocalModelServer;
+  onServerChange(value: LocalModelServer): void;
   endpoint: string;
   onEndpointChange(value: string): void;
+  onCredentialsChanged(connection: LocalModelConnection): void;
   defaultEndpoint: string;
   probe: SettingsModelProbe;
   onProbe(): Promise<void>;
@@ -74,6 +80,77 @@ export const SettingsDialog = memo(function SettingsDialog(props: SettingsDialog
   const [section, setSection] = useState<SectionId>("model");
   const [visited, setVisited] = useState<Partial<Record<SectionId, boolean>>>({ model: true });
   const [compact, setCompact] = useState(() => window.matchMedia("(max-width: 640px)").matches);
+  const apiKeyRef = useRef<HTMLInputElement>(null);
+  const credentialRequestRef = useRef(0);
+  const [credentials, setCredentials] = useState<LocalModelCredentialStatus | null>(null);
+  const [credentialBusy, setCredentialBusy] = useState(false);
+  const [credentialError, setCredentialError] = useState("");
+
+  useEffect(() => {
+    const request = ++credentialRequestRef.current;
+    const input = apiKeyRef.current;
+    if (input) input.value = "";
+    setCredentials(null);
+    setCredentialBusy(false);
+    setCredentialError("");
+    void window.kripl.getLocalModelCredentialStatus({ server: props.server, endpoint: props.endpoint })
+      .then((result) => {
+        if (credentialRequestRef.current !== request) return;
+        setCredentials(result);
+      })
+      .catch(() => {
+        if (credentialRequestRef.current === request) setCredentialError("Could not read the saved API key status.");
+      });
+    return () => {
+      credentialRequestRef.current += 1;
+      if (input) input.value = "";
+    };
+  }, [props.server, props.endpoint]);
+
+  async function connect(): Promise<void> {
+    const request = ++credentialRequestRef.current;
+    const connection = { server: props.server, endpoint: props.endpoint };
+    const apiKey = apiKeyRef.current?.value.trim() ?? "";
+    if (apiKeyRef.current) apiKeyRef.current.value = "";
+    setCredentialBusy(true);
+    setCredentialError("");
+    try {
+      const result = apiKey
+        ? await window.kripl.setLocalModelApiKey(connection, apiKey)
+        : await window.kripl.getLocalModelCredentialStatus(connection);
+      if (apiKey && result.ok) props.onCredentialsChanged(connection);
+      if (credentialRequestRef.current !== request) return;
+      setCredentials(result);
+      if (!result.ok) {
+        setCredentialError(result.error ?? "Could not save the API key.");
+        return;
+      }
+      await props.onProbe();
+    } catch {
+      if (credentialRequestRef.current === request) setCredentialError("Could not connect to the local server.");
+    } finally {
+      if (credentialRequestRef.current === request) setCredentialBusy(false);
+    }
+  }
+
+  async function removeApiKey(): Promise<void> {
+    const request = ++credentialRequestRef.current;
+    const connection = { server: props.server, endpoint: props.endpoint };
+    if (apiKeyRef.current) apiKeyRef.current.value = "";
+    setCredentialBusy(true);
+    setCredentialError("");
+    try {
+      const result = await window.kripl.setLocalModelApiKey(connection, "");
+      if (result.ok) props.onCredentialsChanged(connection);
+      if (credentialRequestRef.current !== request) return;
+      setCredentials(result);
+      if (!result.ok) setCredentialError(result.error ?? "Could not remove the API key.");
+    } catch {
+      if (credentialRequestRef.current === request) setCredentialError("Could not remove the API key.");
+    } finally {
+      if (credentialRequestRef.current === request) setCredentialBusy(false);
+    }
+  }
 
   useEffect(() => {
     const query = window.matchMedia("(max-width: 640px)");
@@ -212,18 +289,40 @@ export const SettingsDialog = memo(function SettingsDialog(props: SettingsDialog
 
             <section className="settings-section" aria-labelledby={`${id}-server-heading`}>
               <h4 id={`${id}-server-heading`}>Local server</h4>
-              <form className="settings-connection" onSubmit={(event) => { event.preventDefault(); void props.onProbe(); }}>
-                <label className="settings-control" htmlFor={`${id}-endpoint`}>
+              <label className="settings-control" htmlFor={`${id}-server`}>
+                <span>Server</span>
+                <select id={`${id}-server`} value={props.server} onChange={(event) => props.onServerChange(event.target.value as LocalModelServer)}>
+                  <option value="lm-studio">LM Studio</option>
+                  <option value="unsloth">Unsloth</option>
+                </select>
+              </label>
+              <form className="settings-connection" onSubmit={(event) => { event.preventDefault(); void connect(); }}>
+                <label className="settings-control settings-endpoint" htmlFor={`${id}-endpoint`}>
                   <span>OpenAI-compatible endpoint</span>
                   <input id={`${id}-endpoint`} value={props.endpoint} onChange={(event) => props.onEndpointChange(event.target.value)} spellCheck={false} autoComplete="off" placeholder={props.defaultEndpoint} />
                 </label>
-                <button className="primary-button" type="submit" disabled={props.probe.status === "checking"}>
-                  {props.probe.status === "checking" ? "Connecting…" : "Connect"}
+                <label className="settings-control" htmlFor={`${id}-api-key`}>
+                  <span>API key</span>
+                  <input id={`${id}-api-key`} ref={apiKeyRef} type="password" autoComplete="off" spellCheck={false} aria-describedby={`${id}-connection-help`} placeholder={credentials?.hasApiKey ? "Leave blank to use saved key" : props.server === "unsloth" ? "sk-unsloth-…" : "Optional"} disabled={credentialBusy} />
+                </label>
+                <button className="primary-button" type="submit" disabled={credentialBusy || props.probe.status === "checking"}>
+                  {credentialBusy || props.probe.status === "checking" ? "Connecting…" : "Connect"}
                 </button>
               </form>
 
+              <div className="settings-key-status">
+                <p role="status">{credentials?.hasApiKey
+                  ? credentials.persistent ? "API key saved on this device." : "API key available until Kripl Studio closes."
+                  : "API key not set."}</p>
+                {credentials?.hasApiKey && <button type="button" className="settings-key-remove" disabled={credentialBusy || props.probe.status === "checking"} onClick={() => void removeApiKey()}>Remove key</button>}
+              </div>
+              <p id={`${id}-connection-help`} className="settings-description">{props.server === "unsloth"
+                ? "Create a key in Unsloth → Settings → API. Load a chat model there, then connect."
+                : "Start the local server in LM Studio. Add an API key if authentication is enabled."}</p>
+              {credentialError && <p className="settings-credential-error" role="alert">{credentialError}</p>}
+
               <div className="settings-connection-status" role={props.probe.status === "error" ? "alert" : "status"}>
-                {props.probe.status === "idle" && <p>Default: LM Studio on port 1234.</p>}
+                {props.probe.status === "idle" && <p>{props.server === "unsloth" ? "Default: Unsloth on port 8888." : "Default: LM Studio on port 1234."}</p>}
                 {props.probe.status === "checking" && <p>Checking the local server…</p>}
                 {props.probe.status === "error" && <p className="error">{props.probe.message}</p>}
                 {props.probe.status === "ready" && <p className={modelListReady ? "ready" : ""}>{modelListReady

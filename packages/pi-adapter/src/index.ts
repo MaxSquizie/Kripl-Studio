@@ -4,6 +4,7 @@ export * from "./pi-browser-tools.js";
 export * from "./pi-agent-runtime.js";
 export * from "./pi-event-normalizer.js";
 export * from "./pi-local-config.js";
+export * from "./pi-local-compat.js";
 export * from "./pi-model-tuning.js";
 export * from "./pi-permission-gate.js";
 export * from "./pi-web-tools.js";

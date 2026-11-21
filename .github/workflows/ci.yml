@@ -6,6 +6,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   verify:
     runs-on: windows-latest
@@ -55,7 +58,7 @@ jobs:
           }
 
       - name: Package Windows
-        run: npm run dist:win
+        run: npm run dist:win --workspace @kripl/desktop -- --publish never
 
       - name: Upload Windows package
         uses: actions/upload-artifact@v4
@@ -63,3 +66,132 @@ jobs:
           name: Kripl-Studio-Windows
           path: apps/desktop/release/**
           if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    concurrency:
+      group: kripl-studio-release
+      cancel-in-progress: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check release metadata
+        id: metadata
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const version = JSON.parse(fs.readFileSync('apps/desktop/package.json', 'utf8')).version;
+            const tag = `v${version}`;
+            const notes = `.github/release-notes/${tag}.md`;
+            if (!fs.existsSync(notes)) return;
+            if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('A stable release version is required.');
+            if (JSON.parse(fs.readFileSync('package.json', 'utf8')).version !== version) {
+              throw new Error('Root and desktop versions do not match.');
+            }
+            if (!fs.readFileSync(notes, 'utf8').trim()) throw new Error('Release notes are empty.');
+            try {
+              const { data: release } = await github.rest.repos.getReleaseByTag({ ...context.repo, tag });
+              if (!release.draft) {
+                core.info(`${tag} is already published.`);
+                return;
+              }
+              if (release.target_commitish !== context.sha) throw new Error('The draft belongs to another commit.');
+              core.setOutput('release_id', String(release.id));
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            try {
+              const { data: ref } = await github.rest.git.getRef({ ...context.repo, ref: `tags/${tag}` });
+              if (ref.object.type !== 'commit' || ref.object.sha !== context.sha) {
+                throw new Error('The release tag does not match the verified commit.');
+              }
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            core.setOutput('version', version);
+            core.setOutput('publish', 'true');
+
+      - name: Download verified Windows package
+        if: steps.metadata.outputs.publish == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: Kripl-Studio-Windows
+          path: release
+
+      - name: Publish Windows release
+        if: steps.metadata.outputs.publish == 'true'
+        uses: actions/github-script@v7
+        env:
+          RELEASE_VERSION: ${{ steps.metadata.outputs.version }}
+          RELEASE_ID: ${{ steps.metadata.outputs.release_id }}
+        with:
+          script: |
+            const fs = require('node:fs');
+            const crypto = require('node:crypto');
+            const zlib = require('node:zlib');
+            const version = process.env.RELEASE_VERSION;
+            const tag = `v${version}`;
+            const sourceName = `Kripl Studio Setup ${version}.exe`;
+            const assetName = `Kripl-Studio-Setup-${version}.exe`;
+            const manifest = fs.readFileSync('release/latest.yml', 'utf8');
+            const installer = fs.readFileSync(`release/${sourceName}`);
+            const blockmap = fs.readFileSync(`release/${sourceName}.blockmap`);
+            const field = (name) => manifest.match(new RegExp(`^${name}:\\s*(\\S+)\\s*$`, 'm'))?.[1];
+            const sha512 = crypto.createHash('sha512').update(installer).digest('base64');
+            const hashes = [...manifest.matchAll(/^\s*sha512:\s*(\S+)\s*$/gm)].map((match) => match[1]);
+            const urls = [...manifest.matchAll(/^\s*- url:\s*(\S+)\s*$/gm)].map((match) => match[1]);
+            const sizes = [...manifest.matchAll(/^\s*size:\s*(\d+)\s*$/gm)].map((match) => Number(match[1]));
+            if (field('version') !== version || field('path') !== assetName ||
+                urls.length !== 1 || urls[0] !== assetName ||
+                sizes.length !== 1 || sizes[0] !== installer.length ||
+                hashes.length !== 2 || hashes.some((hash) => hash !== sha512) ||
+                installer.readUInt16LE(0) !== 0x5a4d) {
+              throw new Error('Installer and update manifest do not match.');
+            }
+            const map = JSON.parse(zlib.gunzipSync(blockmap).toString('utf8'));
+            if (!Array.isArray(map.files) || map.files.length === 0) throw new Error('Invalid installer blockmap.');
+            const body = fs.readFileSync(`.github/release-notes/${tag}.md`, 'utf8').trim();
+            let releaseId = Number(process.env.RELEASE_ID);
+            if (!releaseId) {
+              const { data: release } = await github.rest.repos.createRelease({
+                ...context.repo, tag_name: tag, target_commitish: context.sha,
+                name: `Kripl Studio ${version}`, body, draft: true, prerelease: false,
+              });
+              releaseId = release.id;
+            }
+            const { data: draft } = await github.rest.repos.getRelease({ ...context.repo, release_id: releaseId });
+            if (!draft.draft || draft.target_commitish !== context.sha) throw new Error('Release is not the expected draft.');
+            const assets = [
+              { name: assetName, data: installer, type: 'application/octet-stream' },
+              { name: `${assetName}.blockmap`, data: blockmap, type: 'application/octet-stream' },
+              { name: 'latest.yml', data: Buffer.from(manifest), type: 'text/yaml' },
+            ];
+            for (const asset of assets) {
+              const previous = draft.assets.find((item) => item.name === asset.name);
+              if (previous) await github.rest.repos.deleteReleaseAsset({ ...context.repo, asset_id: previous.id });
+              await github.rest.repos.uploadReleaseAsset({
+                ...context.repo, release_id: releaseId, name: asset.name, data: asset.data,
+                headers: { 'content-type': asset.type, 'content-length': asset.data.length },
+              });
+            }
+            const { data: uploaded } = await github.rest.repos.getRelease({ ...context.repo, release_id: releaseId });
+            for (const asset of assets) {
+              const found = uploaded.assets.find((item) => item.name === asset.name);
+              if (!found || found.state !== 'uploaded' || found.size !== asset.data.length) {
+                throw new Error(`Release asset is incomplete: ${asset.name}`);
+              }
+            }
+            await github.rest.repos.updateRelease({
+              ...context.repo, release_id: releaseId, name: `Kripl Studio ${version}`,
+              body, draft: false, prerelease: false, make_latest: 'true',
+            });
+            core.info(`Published ${tag} from ${context.sha}.`);

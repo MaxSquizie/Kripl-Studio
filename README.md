@@ -108,7 +108,7 @@ Useful scripts (run from the repository root):
 | `npm test` | Unit tests for every package |
 | `npm run typecheck` | Strict TypeScript check across workspaces |
 | `npm run build` | Production build of all packages + desktop app |
-| `npm run dist:win` | Build the NSIS installer (`apps/desktop/release/Kripl Studio Setup 0.0.1.exe`) |
+| `npm run dist:win` | Build the NSIS installer (`apps/desktop/release/Kripl Studio Setup 0.0.2.exe`) |
 
 After code changes, run at least `npm test`, `npm run typecheck`, and `npm run build`.
 
